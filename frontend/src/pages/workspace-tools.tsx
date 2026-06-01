@@ -38,6 +38,40 @@ function htmlEscape(value: any) {
     .replace(/'/g, '&#39;');
 }
 
+function workspaceCodeFromId(workspaceId: string) {
+  return String(workspaceId || '').replace(/^workspace-/, '').toUpperCase() || 'No workspace selected';
+}
+
+function shortId(value: any) {
+  const text = value === undefined || value === null ? '' : String(value);
+  if (!text) return '-';
+  if (text.startsWith('workspace-')) return workspaceCodeFromId(text);
+  return text.length > 18 ? `${text.slice(0, 8)}...${text.slice(-5)}` : text;
+}
+
+function formatDateTime(value: any) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+function formatCountMap(value: any) {
+  if (!value) return '-';
+  const data = typeof value === 'string' ? (() => {
+    try {
+      return JSON.parse(value);
+    } catch (err) {
+      return value;
+    }
+  })() : value;
+
+  if (!data || typeof data !== 'object') return String(data || '-');
+  const entries = Object.entries(data);
+  if (!entries.length) return '-';
+  return entries.map(([key, count]) => `${key}: ${count}`).join(', ');
+}
+
 function toCsv(rows: any[], columns: string[]) {
   return [
     columns.map(csvEscape).join(','),
@@ -154,6 +188,32 @@ function WorkspaceTools() {
 
   const historyColumns = ['timestamp', 'userName', 'userDesignation', 'action', 'toolType', 'pageNumber', 'annotationId', 'documentId'];
   const userColumns = ['userName', 'designation', 'total', 'byAction', 'byTool', 'byPage'];
+  const historyColumnLabels: { [key: string]: string } = {
+    timestamp: 'Time',
+    userName: 'Contributor',
+    userDesignation: 'Designation',
+    action: 'Action',
+    toolType: 'Tool',
+    pageNumber: 'Page',
+    annotationId: 'Annotation',
+    documentId: 'Document',
+  };
+  const userColumnLabels: { [key: string]: string } = {
+    userName: 'Contributor',
+    designation: 'Designation',
+    total: 'Events',
+    byAction: 'Actions',
+    byTool: 'Tools',
+    byPage: 'Pages',
+  };
+  const workspaceCode = workspaceCodeFromId(workspaceId);
+  const formatHistoryValue = (row: any, column: string) => {
+    if (column === 'timestamp') return formatDateTime(row[column]);
+    if (column === 'annotationId' || column === 'documentId') return shortId(row[column]);
+    if (column === 'toolType') return row[column] || 'canvas';
+    if (column === 'pageNumber') return row[column] || 1;
+    return row[column] || '-';
+  };
   const summary = [
     { label: 'Meeting notes', value: notes.length },
     { label: 'Annotation events', value: history.length },
@@ -176,8 +236,13 @@ function WorkspaceTools() {
       {status ? <p className="status-line">{status}</p> : null}
 
       <section className="workspace-tools-section">
-        <label htmlFor="workspaceId">Workspace ID</label>
+        <label htmlFor="workspaceId">Workspace code or selected workspace</label>
         <input id="workspaceId" value={workspaceId} onChange={(evt: any) => rememberWorkspace(evt.target.value)} />
+        <div className="workspace-context-card">
+          <span>Selected workspace</span>
+          <strong>{workspaceCode}</strong>
+          <p>Use History from a workspace card to open this page with the correct workspace. The reports below show contributors, actions, page activity, documents, notes, and export archive data.</p>
+        </div>
       </section>
 
       <section className="workspace-summary-grid" aria-label="Workspace summary">
@@ -227,7 +292,7 @@ function WorkspaceTools() {
         <div className="report-table">
           <table>
             <thead>
-              <tr>{historyColumns.map(column => <th key={column}>{column}</th>)}</tr>
+              <tr>{historyColumns.map(column => <th key={column}>{historyColumnLabels[column] || column}</th>)}</tr>
             </thead>
             <tbody>
               {history.map((row, index) => (
@@ -236,7 +301,7 @@ function WorkspaceTools() {
                   className={row.annotationId === selectedAnnotationId ? 'selected' : ''}
                   onClick={() => loadAnnotationTimeline(row.annotationId)}
                 >
-                  {historyColumns.map(column => <td key={column}>{row[column]}</td>)}
+                  {historyColumns.map(column => <td key={column}>{formatHistoryValue(row, column)}</td>)}
                 </tr>
               ))}
             </tbody>
@@ -246,7 +311,7 @@ function WorkspaceTools() {
           <div className="timeline-header">
             <div>
               <span className="eyebrow">Annotation timeline</span>
-              <h3>{selectedAnnotationId || 'Select an annotation row'}</h3>
+              <h3>{selectedAnnotationId ? `Annotation ${shortId(selectedAnnotationId)}` : 'Select an annotation row'}</h3>
             </div>
             <strong>{annotationTimeline.length}</strong>
           </div>
@@ -258,7 +323,7 @@ function WorkspaceTools() {
                   <article>
                     <header>
                       <strong>{event.action || 'event'} · {event.toolType || 'tool'}</strong>
-                      <span>{event.timestamp || ''}</span>
+                      <span>{formatDateTime(event.timestamp)}</span>
                     </header>
                     <p>{event.userName || 'Unknown'} {event.userDesignation ? `- ${event.userDesignation}` : ''}</p>
                     <dl>
@@ -268,7 +333,7 @@ function WorkspaceTools() {
                       </div>
                       <div>
                         <dt>Document</dt>
-                        <dd>{event.documentId || '-'}</dd>
+                        <dd title={event.documentId || ''}>{shortId(event.documentId)}</dd>
                       </div>
                     </dl>
                     <details>
@@ -304,17 +369,17 @@ function WorkspaceTools() {
         <div className="report-table">
           <table>
             <thead>
-              <tr>{userColumns.map(column => <th key={column}>{column}</th>)}</tr>
+              <tr>{userColumns.map(column => <th key={column}>{userColumnLabels[column] || column}</th>)}</tr>
             </thead>
             <tbody>
               {userReport.map((row, index) => (
                 <tr key={`${row.userId}-${index}`}>
-                  <td>{row.userName}</td>
-                  <td>{row.designation}</td>
-                  <td>{row.total}</td>
-                  <td>{JSON.stringify(row.byAction || {})}</td>
-                  <td>{JSON.stringify(row.byTool || {})}</td>
-                  <td>{JSON.stringify(row.byPage || {})}</td>
+                  <td>{row.userName || 'Unknown'}</td>
+                  <td>{row.designation || '-'}</td>
+                  <td>{row.total || 0}</td>
+                  <td>{formatCountMap(row.byAction)}</td>
+                  <td>{formatCountMap(row.byTool)}</td>
+                  <td>{formatCountMap(row.byPage)}</td>
                 </tr>
               ))}
             </tbody>

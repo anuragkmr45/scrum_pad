@@ -53,6 +53,8 @@ type WorkspaceMemberRow = {
   user_designation: string
 }
 
+type WorkspaceTab = 'previous' | 'invited' | 'joined';
+
 const hasAgoraAppId = Boolean(process.env.REACT_APP_AGORA_APP_ID);
 const hasConverterUrl = Boolean(process.env.REACT_APP_LIBRE_BACKEND_URL);
 
@@ -70,6 +72,17 @@ function normalizedWorkspaceKey(roomName: string) {
 
 function workspaceIdForName(roomName: string) {
   return `workspace-${MD5(normalizedWorkspaceKey(roomName))}`;
+}
+
+function workspaceCodeFromId(workspaceId: string) {
+  return String(workspaceId || '').replace(/^workspace-/, '').toUpperCase() || 'NEW';
+}
+
+function formatDateLabel(value: string) {
+  if (!value) return 'Not recorded';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
 }
 
 function generateWorkspaceCode() {
@@ -116,6 +129,7 @@ function HomePage() {
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRow[]>([]);
   const [autoJoinStarted, setAutoJoinStarted] = useState<boolean>(false);
   const [workspaceLoadComplete, setWorkspaceLoadComplete] = useState<boolean>(false);
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('previous');
 
   useEffect(() => {
     if (!hasConverterUrl) return;
@@ -188,6 +202,11 @@ function HomePage() {
   const handleLogout = () => {
     clearAuthSession();
     setAuthUser(null);
+    setAuthMode('login');
+    setAuthForm({
+      ...authForm,
+      password: '',
+    });
     setWorkspaces([]);
     setInvitations([]);
     setShareWorkspace(null);
@@ -395,6 +414,16 @@ function HomePage() {
       .catch((err: any) => setStatus(err.message));
   };
 
+  const joinedWorkspaces = authUser
+    ? workspaces.filter((workspace) => roleForWorkspace(workspace) === 'reviewer')
+    : [];
+  const visibleWorkspaces = workspaceTab === 'joined' ? joinedWorkspaces : workspaces;
+  const workspaceTabCounts = {
+    previous: workspaces.length,
+    invited: invitations.length,
+    joined: joinedWorkspaces.length,
+  };
+
   if (!authUser) {
     return (
       <div className="auth-page">
@@ -490,12 +519,44 @@ function HomePage() {
           <div className="section-heading-row">
             <div>
               <span className="eyebrow">Workspaces</span>
-              <h2>Previous and invited workspaces</h2>
+              <h2>Your workspace activity</h2>
             </div>
-            <strong>{workspaces.length}</strong>
+            <strong>{workspaceTabCounts[workspaceTab]}</strong>
+          </div>
+          <div className="workspace-tabs" role="tablist" aria-label="Workspace lists">
+            {(['previous', 'invited', 'joined'] as WorkspaceTab[]).map((tab) => (
+              <button
+                key={tab}
+                role="tab"
+                type="button"
+                className={workspaceTab === tab ? 'active' : ''}
+                aria-selected={workspaceTab === tab}
+                onClick={() => setWorkspaceTab(tab)}
+              >
+                <span>{tab === 'previous' ? 'Previous' : tab === 'invited' ? 'Invited' : 'Joined'}</span>
+                <strong>{workspaceTabCounts[tab]}</strong>
+              </button>
+            ))}
           </div>
           <div className="workspace-card-list">
-            {workspaces.length ? workspaces.map((workspace) => {
+            {workspaceTab === 'invited' ? (
+              invitations.length ? invitations.map((invite: any, index: number) => (
+                <article key={invite.id || `${invite.workspace_id}-${index}`} className="workspace-card invite-card">
+                  <div className="workspace-card-top">
+                    <div>
+                      <h3>{invite.workspace_name || 'Invited workspace'}</h3>
+                      <span>Pending invitation · Reviewer access</span>
+                    </div>
+                    <span className="workspace-code-inline">{workspaceCodeFromId(invite.workspace_id)}</span>
+                  </div>
+                  <div className="workspace-card-metrics">
+                    <span>Invited {formatDateLabel(invite.created_at)}</span>
+                    <span>{invite.invited_email || authUser.email}</span>
+                  </div>
+                  <p className="workspace-card-helper">Login with the invited email. Accepted workspaces appear under Previous and Joined.</p>
+                </article>
+              )) : <p className="empty-state">No pending invitations for {authUser.email}. Ask the lead reviewer to invite this email if a workspace is missing.</p>
+            ) : visibleWorkspaces.length ? visibleWorkspaces.map((workspace) => {
               const role = roleForWorkspace(workspace);
               return (
                 <article key={workspace.id} className="workspace-card">
@@ -504,13 +565,17 @@ function HomePage() {
                       <h3>{workspace.name}</h3>
                       <span>{role === 'lead' ? 'Lead reviewer' : 'Reviewer'} · {workspace.status || 'active'}</span>
                     </div>
-                    <i style={{ background: workspace.member_color || authUser.color }} />
+                    <div className="workspace-card-marker">
+                      <span className="workspace-code-inline">{workspaceCodeFromId(workspace.id)}</span>
+                      <i style={{ background: workspace.member_color || authUser.color }} />
+                    </div>
                   </div>
                   <div className="workspace-card-metrics">
                     <span>{workspace.participant_count || 1} participants</span>
-                    <span>{workspace.document_count || 0} docs</span>
-                    <span>{workspace.annotation_event_count || 0} marks</span>
+                    <span>{workspace.document_count || 0} documents</span>
+                    <span>{workspace.annotation_event_count || 0} collaboration events</span>
                   </div>
+                  <p className="workspace-card-helper">History includes meeting notes, contributor reports, annotation timeline, and archive exports for this workspace.</p>
                   <div className="workspace-card-actions">
                     <button onClick={() => launchWorkspace(workspace.name, role, workspace.id, workspace.member_color)}>Open</button>
                     <Link onClick={() => setWorkspaceId(workspace.id)} to="/workspace-tools">History</Link>
@@ -519,7 +584,7 @@ function HomePage() {
                   </div>
                 </article>
               );
-            }) : <p className="empty-state">No saved workspace yet. Create one or ask the lead reviewer to share it with your email.</p>}
+            }) : <p className="empty-state">{workspaceTab === 'joined' ? 'No joined reviewer workspaces yet.' : 'No saved workspace yet. Create one or ask the lead reviewer to share it with your email.'}</p>}
           </div>
         </section>
 
@@ -533,7 +598,7 @@ function HomePage() {
           {shareWorkspace ? (
             <div className="workspace-code-card compact">
               <span>Invite code</span>
-              <strong>{shareWorkspace.id.replace(/^workspace-/, '').toUpperCase()}</strong>
+              <strong>{workspaceCodeFromId(shareWorkspace.id)}</strong>
               <small>Access is still limited to invited users.</small>
             </div>
           ) : null}

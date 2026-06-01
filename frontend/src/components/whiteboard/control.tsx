@@ -29,8 +29,9 @@ import RotateRightIcon from '@material-ui/icons/RotateRight';
 import KeyboardArrowDownIcon from '@material-ui/icons/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@material-ui/icons/KeyboardArrowUp';
 import PeopleIcon from '@material-ui/icons/People';
+import ShareIcon from '@material-ui/icons/Share';
 import { undoAnnotations, redoAnnotations, getAnnotationHistoryState, addHistoryStateListener } from '../../utils/annotation-history';
-import { getWorkspaceId, listWorkspaceMembers, updateWorkspaceMemberStatus } from '../../utils/hexscrum-api';
+import { getWorkspaceId, inviteWorkspaceUser, listWorkspaceMembers, searchUsers, updateWorkspaceMemberStatus } from '../../utils/hexscrum-api';
 
 
 interface ControlItemProps {
@@ -258,6 +259,10 @@ function getExportCanvasOptions(): ExportCanvasOption[] {
   }));
 }
 
+function workspaceCodeFromId(workspaceId: string) {
+  return String(workspaceId || '').replace(/^workspace-/, '').toUpperCase() || 'WORKSPACE';
+}
+
 function rotateCanvas(source: HTMLCanvasElement, rotation: number) {
   const normalizedRotation = ((rotation % 360) + 360) % 360;
   if (normalizedRotation === 0) return source;
@@ -335,6 +340,12 @@ export default function Control({
   const [controlsCollapsed, setControlsCollapsed] = useState(false);
   const [participantPanelOpen, setParticipantPanelOpen] = useState(false);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRow[]>([]);
+  const [sharePanelOpen, setSharePanelOpen] = useState(false);
+  const [shareEmail, setShareEmail] = useState('');
+  const [shareSearch, setShareSearch] = useState('');
+  const [shareUsers, setShareUsers] = useState<any[]>([]);
+  const [shareLink, setShareLink] = useState('');
+  const [shareStatus, setShareStatus] = useState('');
   let recorder = useRef<any>();
   let desktopStream = useRef<any>();
   const previewRequestId = useRef(0);
@@ -510,8 +521,15 @@ export default function Control({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exportDialogOpen, selectedExportCanvasIds, exportIncludeAnnotations]);
 
+  const currentWorkspaceId = () => getWorkspaceId() || roomStore._state.course.rid || '';
+
+  const currentWorkspaceInviteLink = () => {
+    const workspaceId = currentWorkspaceId();
+    return workspaceId ? `${window.location.origin}/?join=${encodeURIComponent(workspaceId)}` : '';
+  };
+
   const loadParticipants = () => {
-    const workspaceId = getWorkspaceId() || roomStore._state.course.rid || '';
+    const workspaceId = currentWorkspaceId();
     if (!workspaceId || !canManageWorkspace) return;
     listWorkspaceMembers(workspaceId)
       .then((data: any) => setWorkspaceMembers(data.members || []))
@@ -526,7 +544,56 @@ export default function Control({
   const toggleParticipantPanel = () => {
     const next = !participantPanelOpen;
     setParticipantPanelOpen(next);
+    if (next) setSharePanelOpen(false);
     if (next) loadParticipants();
+  };
+
+  const openSharePanel = () => {
+    setSharePanelOpen(true);
+    setParticipantPanelOpen(false);
+    setShareStatus('');
+    setShareLink(currentWorkspaceInviteLink());
+  };
+
+  const handleShareUserSearch = () => {
+    if (!shareSearch.trim()) {
+      setShareUsers([]);
+      return;
+    }
+    searchUsers(shareSearch.trim())
+      .then((data: any) => setShareUsers(data.users || []))
+      .catch((err: any) => setShareStatus(err.message || 'Unable to search users'));
+  };
+
+  const handleInviteReviewer = async () => {
+    const workspaceId = currentWorkspaceId();
+    const email = shareEmail.trim();
+    if (!workspaceId || !email) return;
+
+    try {
+      await inviteWorkspaceUser(workspaceId, {
+        email,
+        role: 'reviewer',
+      });
+      setShareStatus('Invite created. Share this link only with the invited reviewer.');
+      setShareEmail('');
+      setShareUsers([]);
+      setShareLink(currentWorkspaceInviteLink());
+      loadParticipants();
+    } catch (err) {
+      setShareStatus(err.message || 'Unable to create invite');
+    }
+  };
+
+  const copyInRoomShareLink = async () => {
+    const link = shareLink || currentWorkspaceInviteLink();
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      setShareStatus('Invite link copied.');
+    } catch (err) {
+      setShareStatus('Copy failed. Select and copy the link manually.');
+    }
   };
 
   const activeParticipants = () => {
@@ -545,7 +612,7 @@ export default function Control({
   };
 
   const updateParticipantStatus = async (participant: any, status: 'active' | 'kicked' | 'blocked') => {
-    const workspaceId = getWorkspaceId() || roomStore._state.course.rid || '';
+    const workspaceId = currentWorkspaceId();
     if (!workspaceId || !participant.authUserId) {
       globalStore.showToast({
         type: 'notice-board',
@@ -901,6 +968,11 @@ export default function Control({
                 <PeopleIcon onClick={toggleParticipantPanel} />
                 <span className="tooltiptext">Participants</span>
               </div> : null}
+            {canManageWorkspace ?
+              <div className='control-button'>
+                <ShareIcon onClick={openSharePanel} />
+                <span className="tooltiptext">Share workspace</span>
+              </div> : null}
             {
               role === 'teacher' ?
                 (
@@ -961,6 +1033,59 @@ export default function Control({
               </>
               : null}
 
+          </div> : null}
+        {sharePanelOpen && canManageWorkspace ?
+          <div className="share-control-panel">
+            <div className="participant-control-header">
+              <div>
+                <span>Share</span>
+                <strong>Invite reviewer</strong>
+              </div>
+              <button onClick={() => setSharePanelOpen(false)}>Close</button>
+            </div>
+            <div className="share-control-code">
+              <span>Workspace code</span>
+              <strong>{workspaceCodeFromId(currentWorkspaceId())}</strong>
+              <small>{roomStore._state.course.roomName || 'Live workspace'}</small>
+            </div>
+            <label className="share-control-field">
+              Reviewer email
+              <input
+                value={shareEmail}
+                onChange={(evt: any) => setShareEmail(evt.target.value)}
+                placeholder="reviewer@example.com"
+              />
+            </label>
+            <div className="share-control-actions">
+              <button disabled={!shareEmail.trim()} onClick={handleInviteReviewer}>Send invite</button>
+              <button onClick={copyInRoomShareLink}>Copy link</button>
+            </div>
+            <div className="share-control-search">
+              <label className="share-control-field">
+                Search users
+                <input
+                  value={shareSearch}
+                  onChange={(evt: any) => setShareSearch(evt.target.value)}
+                  placeholder="Name or email"
+                />
+              </label>
+              <button onClick={handleShareUserSearch}>Search</button>
+            </div>
+            {shareUsers.length ?
+              <div className="share-user-results">
+                {shareUsers.map((user: any) => (
+                  <button key={user.id} onClick={() => setShareEmail(user.email)}>
+                    <strong>{user.name}</strong>
+                    <span>{user.email}</span>
+                  </button>
+                ))}
+              </div> : null}
+            {shareLink ?
+              <div className="share-link-display">
+                <span>Restricted join link</span>
+                <input value={shareLink} readOnly />
+              </div> : null}
+            {shareStatus ? <p className="share-control-status">{shareStatus}</p> : null}
           </div> : null}
         {participantPanelOpen && canManageWorkspace ?
           <div className="participant-control-panel">

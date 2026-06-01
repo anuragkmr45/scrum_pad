@@ -1272,6 +1272,7 @@ body.touch-action-disable * {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 18px;
   h1 {
     margin: 4px 0 4px;
     font-size: 28px;
@@ -1293,6 +1294,9 @@ body.touch-action-disable * {
   align-items: center;
   a,
   button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     min-height: 36px;
     border: 1px solid rgba(64, 61, 57, 0.18);
     border-radius: 9px;
@@ -1311,6 +1315,17 @@ body.touch-action-disable * {
       border-color: rgba(235, 94, 40, 0.42);
       color: var(--rustic-paprika);
     }
+  }
+}
+
+.dashboard-header-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+
+  a,
+  button {
+    height: 38px;
+    line-height: 1;
   }
 }
 
@@ -1388,6 +1403,57 @@ body.touch-action-disable * {
   gap: 12px;
 }
 
+.workspace-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 5px;
+  border-radius: 14px;
+  background: rgba(64, 61, 57, 0.08);
+
+  button {
+    min-width: 0;
+    min-height: 46px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border: 0;
+    border-radius: 11px;
+    padding: 0 12px;
+    background: transparent;
+    color: var(--rustic-charcoal);
+    cursor: pointer;
+    transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+
+    &.active {
+      background: var(--rustic-paprika);
+      color: var(--rustic-floral);
+      box-shadow: 0 10px 24px rgba(235, 94, 40, 0.22);
+    }
+
+    span {
+      color: inherit;
+      font-size: 13px;
+      font-weight: 830;
+    }
+
+    strong {
+      min-width: 24px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: rgba(255, 252, 242, 0.62);
+      color: inherit;
+      font-size: 12px;
+      font-weight: 850;
+    }
+  }
+}
+
 .workspace-card {
   padding: 16px;
   border: 1px solid rgba(64, 61, 57, 0.14);
@@ -1416,6 +1482,40 @@ body.touch-action-disable * {
     border: 2px solid rgba(255, 252, 242, 0.9);
     box-shadow: 0 0 0 1px rgba(64, 61, 57, 0.18);
   }
+}
+
+.workspace-card-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.workspace-code-inline {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  max-width: 180px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: rgba(64, 61, 57, 0.08);
+  color: var(--rustic-charcoal) !important;
+  font-size: 12px !important;
+  font-weight: 850;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-card-helper {
+  margin: -2px 0 14px;
+  color: var(--rustic-ink-soft);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.invite-card {
+  border-style: dashed;
 }
 
 .workspace-card-metrics {
@@ -1632,6 +1732,10 @@ body.touch-action-disable * {
     grid-row: auto;
   }
 
+  .workspace-dashboard-header {
+    align-items: flex-start;
+  }
+
   .participant-manage-row,
   .invite-link-box {
     grid-template-columns: 1fr;
@@ -1639,6 +1743,31 @@ body.touch-action-disable * {
 
   .participant-actions {
     justify-content: flex-start;
+  }
+}
+
+@media screen and (max-width: 720px) {
+  .workspace-dashboard-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dashboard-header-actions {
+    justify-content: flex-start;
+  }
+
+  .workspace-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-card-top {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .workspace-card-marker {
+    width: 100%;
+    justify-content: space-between;
   }
 }
 
@@ -1769,6 +1898,39 @@ body.touch-action-disable * {
       outline: 2px solid rgba(235, 94, 40, 0.22);
       border-color: var(--rustic-paprika);
     }
+  }
+}
+
+.workspace-context-card {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(64, 61, 57, 0.12);
+  border-radius: 12px;
+  background: rgba(204, 197, 185, 0.22);
+
+  span {
+    color: var(--rustic-ink-soft);
+    font-size: 12px;
+    font-weight: 820;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  strong {
+    color: var(--rustic-carbon);
+    font-size: 22px;
+    line-height: 28px;
+    letter-spacing: 0;
+  }
+
+  p {
+    margin: 0;
+    max-width: 780px;
+    color: var(--rustic-ink-soft);
+    font-size: 13px;
+    line-height: 20px;
   }
 }
 
