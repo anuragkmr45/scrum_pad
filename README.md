@@ -21,6 +21,12 @@ This is not a finished enterprise audit product. It has a functional MVP audit/r
 cp converter-api/.env.example converter-api/.env
 cp frontend/.env.local.example frontend/.env.local
 
+./scripts/run_dev.sh
+```
+
+Or run services separately:
+
+```bash
 ./scripts/run_converter.sh
 ./scripts/run_frontend.sh
 ```
@@ -67,6 +73,9 @@ Backend private env:
 - `CLOUDINARY_FOLDER=hexscrum-workspace`
 - `DATABASE_URL`: Neon Postgres connection string.
 - `DATABASE_SSL=true`
+- `AGORA_APP_ID`: same Agora project as `REACT_APP_AGORA_APP_ID`.
+- `AGORA_APP_CERTIFICATE`: required when Agora App Certificate/dynamic key is enabled.
+- `AGORA_RTM_TOKEN_TTL_SECONDS=3600`
 - `FRONTEND_ORIGIN=https://YOUR-VERCEL-APP.vercel.app`
 - `CORS_ORIGINS=https://YOUR-VERCEL-APP.vercel.app`
 
@@ -77,18 +86,19 @@ Do not put Cloudinary secrets or `DATABASE_URL` in the frontend.
 - HexScrum-branded frontend shell builds for Vercel.
 - Frontend warns when Agora/backend config is missing.
 - Uploads go through the backend `/upload` endpoint for PDFs, Office/report files, and PNG/JPG images.
-- Backend converts Office/report/image inputs to PDF where LibreOffice/unoconv or PDFKit supports it, then uploads to Cloudinary.
+- Backend converts Office/report/image inputs to PDF where LibreOffice/unoconv or PDFKit supports it, uploads to Cloudinary, and returns a backend `/files/...pdf` URL that PDF.js can load even when direct Cloudinary PDF delivery is blocked.
 - Backend exposes `/health` with storage, database, Cloudinary, and converter status.
 - Backend exposes MVP endpoints for workspaces, annotation events, meeting notes, reports, and JSON archive manifests.
 - Frontend records local profile metadata: name, designation, color.
 - Frontend sends non-blocking annotation audit events where PDFJS Annotate emits create/update/delete/reset events.
 - Frontend has a Notes & Reports page for notes, annotation history, user-wise report, CSV/JSON exports, HTML notes export, and JSON archive manifest download.
-- Existing upstream annotated PDF export path remains available in the whiteboard controls.
+- Existing upstream annotated PDF export path remains available in the whiteboard controls and includes uploaded document canvases.
 
 ## Current Limits
 
 - Realtime collaboration still needs a valid Agora App ID and two-browser QA.
 - Office upload/conversion needs the Render Docker image or local LibreOffice/unoconv available on `PATH`.
+- Backend-served uploaded files are stored on the running service filesystem. On Render this is suitable for MVP/live-session use, but files can be lost on service redeploy/restart unless a persistent disk or object-store delivery policy is added.
 - Neon schema initialization is idempotent; run `cd converter-api && npm run db:init` after setting `DATABASE_URL`.
 - The archive is a JSON manifest MVP, not a full ZIP of binaries.
 - Arrow remains an MVP gap unless the upstream line tool is accepted as the temporary substitute.

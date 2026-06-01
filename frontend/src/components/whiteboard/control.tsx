@@ -257,44 +257,58 @@ export default function Control({
 
   // download anntated canvas as single .pdf file
   const printDocument = async () => {
-      try {
-        // add active class to every canvas div
-        await activediv('active')
+    try {
+      await activediv('active');
 
-        // get number of canvas
-        const input = document.getElementById('main-container')?.childElementCount;
-        let pdf = new jsPDF('l', 'mm', 'a0');
-        let pdfSize = 0;
+      const viewers = Array.from(
+        document.querySelectorAll('#main-container > .pdfViewer')
+      ) as HTMLElement[];
 
-        // loop through every canvas
-        for (let i = 1; i <= input!; i++) {
-          
-          // get canvas
-          const d = document.querySelector('#viewerContainer' + i) as HTMLElement;
-    
-          if (d) {
-            pdfSize = pdfSize + 1;
-            const canvas = await html2canvas(d);
-            // convert canvas to image
-            const imgData = canvas.toDataURL('image/jpeg');
-            pdf.setFontSize(40);
-            // add page number for pdf
-            pdf.text(`Page Number: ${i}`, 12, 12);
-            pdf.addImage(imgData, 'JPEG', -50, 0, canvas.width - 100, canvas.height - 100);
-            // add empty page for next iteration
-            pdf.addPage();
-          }
+      if (!viewers.length) {
+        globalStore.showToast({
+          type: 'notice-board',
+          message: 'No workspace pages to download',
+        });
+        return;
+      }
+
+      const pdf = new jsPDF('l', 'mm', 'a0');
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+
+      for (let i = 0; i < viewers.length; i++) {
+        if (i > 0) {
+          pdf.addPage();
         }
-        // delete last page if empty
-        if (pdfSize <= input!) {
-          pdf.deletePage(pdfSize + 1);
-        }
-        // save pdf
-        pdf.save("testdownload.pdf");
 
-        // remove active class from canvas div
-        await activediv('deactive');
-      } catch(err) {}
+        const canvas = await html2canvas(viewers[i], {
+          backgroundColor: '#ffffff',
+          useCORS: true,
+        });
+        const imgData = canvas.toDataURL('image/jpeg', 0.95);
+        const margin = 20;
+        const availableWidth = pageWidth - margin * 2;
+        const availableHeight = pageHeight - margin * 2;
+        const scale = Math.min(availableWidth / canvas.width, availableHeight / canvas.height);
+        const imageWidth = canvas.width * scale;
+        const imageHeight = canvas.height * scale;
+        const x = (pageWidth - imageWidth) / 2;
+        const y = (pageHeight - imageHeight) / 2;
+
+        pdf.addImage(imgData, 'JPEG', x, y, imageWidth, imageHeight);
+      }
+
+      const roomName = roomStore._state.course.roomName || 'workspace';
+      const fileName = roomName.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'workspace';
+      pdf.save(`${fileName}-annotated.pdf`);
+    } catch (err) {
+      globalStore.showToast({
+        type: 'notice-board',
+        message: 'PDF download failed. Please try again.',
+      });
+    } finally {
+      await activediv('deactive');
+    }
   }
 
   const showTool: boolean = useMemo(() => {
@@ -569,4 +583,3 @@ export default function Control({
     </>
   )
 };
-

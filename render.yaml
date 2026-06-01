@@ -1,15 +1,18 @@
 services:
   - type: web
     name: hexscrum-converter-api
-    env: docker
+    runtime: docker
     rootDir: converter-api
-    plan: starter
+    plan: free
+    region: singapore
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
       - key: STORAGE_PROVIDER
         value: cloudinary
+      - key: LOCAL_UPLOAD_DIR
+        value: /app/uploaded-files
       - key: CLOUDINARY_FOLDER
         value: hexscrum-workspace
       - key: MAX_UPLOAD_MB
@@ -28,3 +31,9 @@ services:
         sync: false
       - key: DATABASE_SSL
         value: "true"
+      - key: AGORA_APP_ID
+        sync: false
+      - key: AGORA_APP_CERTIFICATE
+        sync: false
+      - key: AGORA_RTM_TOKEN_TTL_SECONDS
+        value: "3600"

@@ -13,6 +13,14 @@ function missingAgoraAppIdError() {
   return err;
 }
 
+function normalizeAgoraLoginError(err: any) {
+  const message = `${err && (err.reason || err.message || err)}`;
+  if (message.toLowerCase().indexOf('dynamic key') !== -1 || message.indexOf('Error Code 5') !== -1) {
+    err.reason = 'Agora App Certificate is enabled. Set AGORA_APP_ID and AGORA_APP_CERTIFICATE on the backend so the frontend can fetch an RTM token, or disable App Certificate in the Agora console.';
+  }
+  return err;
+}
+
 export enum RoomMessage {
   applyCoVideo = 105,
   acceptCoVideo = 106,
@@ -97,7 +105,12 @@ export default class AgoraRTMClient {
     if (!this._client) {
       this._client = AgoraRTM.createInstance(APP_ID, { enableLogUpload: ENABLE_LOG, logFilter });
     }
-    await this._client.login({uid, token});
+    try {
+      const loginArgs = token ? { uid, token } : { uid };
+      await this._client.login(loginArgs);
+    } catch (err) {
+      throw normalizeAgoraLoginError(err);
+    }
     this._client.on("ConnectionStateChanged", (newState: string, reason: string) => {
       this._bus.emit("ConnectionStateChanged", {newState, reason});
     });
@@ -183,7 +196,6 @@ export default class AgoraRTMClient {
       channelAttributes[key] = JSON.stringify(attrs);
     }
 
-    console.log("[rtm-client] updateChannelAttrsByKey ", attrs, " key ", key, channelAttributes);
     try {
       await this._client.addOrUpdateChannelAttributes(
         this._currentChannelName,
@@ -274,7 +286,6 @@ export default class AgoraRTMClient {
 
   async sendPeerMessage(peerId: string, body: MessageBody) {
     resolveMessage(peerId, body);
-    console.log("[rtm-client] send peer message ", peerId, JSON.stringify(body));
     try {
       let result = await this._client.sendMessageToPeer({text: JSON.stringify(body)}, peerId, {enableHistoricalMessaging: true});
     return result.hasPeerReceived;

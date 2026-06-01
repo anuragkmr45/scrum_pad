@@ -296,6 +296,26 @@ require_cloudinary() {
   [[ "$ok" -eq 1 ]] && mark_pass "Cloudinary name/key/secret are set"
 }
 
+check_agora_backend_token_config() {
+  local file="$1"
+  local strict="$2"
+  local app_id
+  local app_certificate
+  app_id="$(env_value "$file" AGORA_APP_ID)"
+  app_certificate="$(env_value "$file" AGORA_APP_CERTIFICATE)"
+
+  if ! is_placeholder "$app_id" && ! is_placeholder "$app_certificate"; then
+    mark_pass "Agora RTM token backend is configured"
+    return
+  fi
+
+  if [[ "$strict" == "yes" ]]; then
+    mark_fail "AGORA_APP_ID and AGORA_APP_CERTIFICATE are required when Agora App Certificate is enabled"
+  else
+    mark_warn "Agora RTM token backend is not configured; tokenless login only works if App Certificate is disabled in Agora"
+  fi
+}
+
 check_upload_limit_match() {
   local frontend_env="$1"
   local backend_env="$2"
@@ -326,6 +346,9 @@ check_frontend_forbidden_keys() {
     STORAGE_PROVIDER
     AWS_BUCKET_KEY
     AWS_BUCKET_SECRET
+    AGORA_APP_ID
+    AGORA_APP_CERTIFICATE
+    AGORA_RTM_TOKEN_TTL_SECONDS
   )
   local found=0
   for key in "${forbidden[@]}"; do
@@ -375,7 +398,7 @@ check_templates() {
   done
 
   if [[ -f "$backend_example" ]]; then
-    for key in PORT NODE_ENV FRONTEND_ORIGIN CORS_ORIGINS MAX_UPLOAD_MB STORAGE_PROVIDER CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET CLOUDINARY_URL CLOUDINARY_FOLDER DATABASE_URL DATABASE_SSL; do
+    for key in PORT NODE_ENV FRONTEND_ORIGIN CORS_ORIGINS MAX_UPLOAD_MB STORAGE_PROVIDER CLOUDINARY_CLOUD_NAME CLOUDINARY_API_KEY CLOUDINARY_API_SECRET CLOUDINARY_URL CLOUDINARY_FOLDER DATABASE_URL DATABASE_SSL AGORA_APP_ID AGORA_APP_CERTIFICATE AGORA_RTM_TOKEN_TTL_SECONDS; do
       require_key_in_template "$backend_example" "$key"
     done
   fi
@@ -464,6 +487,8 @@ check_actual_env() {
   require_cloudinary "$backend_env"
   require_value "$backend_env" CLOUDINARY_FOLDER "CLOUDINARY_FOLDER"
   require_postgres_url "$backend_env" DATABASE_URL "DATABASE_URL"
+  check_agora_backend_token_config "$backend_env" "$strict"
+  require_optional_default "$backend_env" AGORA_RTM_TOKEN_TTL_SECONDS "AGORA_RTM_TOKEN_TTL_SECONDS"
   if [[ "$strict" == "yes" ]]; then
     require_exact_value "$backend_env" DATABASE_SSL true "DATABASE_SSL"
   else

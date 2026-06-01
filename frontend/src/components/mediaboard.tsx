@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useState, useReducer } from 'react';
+import React, { useMemo, useEffect, useState, useReducer, useRef } from 'react';
 import Whiteboard from './whiteboard';
 import Control from './whiteboard/control';
 import { useLocation } from 'react-router';
@@ -19,6 +19,32 @@ interface MediaBoardProps {
 }
 
 export const fileContext = React.createContext({} as any);
+
+const appendFile = (state: any[], fileId: any) => {
+  if (!fileId || state.some((value: any) => String(value) === String(fileId))) {
+    return state;
+  }
+  return [...state, fileId];
+};
+
+const uploadedFilesFrom = (files: any[]) => {
+  return files.filter((value: any) => typeof value === 'string' && /^https?:\/\//.test(value));
+};
+
+const parseSharedUploadedFiles = (value: any) => {
+  if (!value || typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((item: any) => typeof item === 'string' && /^https?:\/\//.test(item));
+    }
+  } catch (err) {
+    if (/^https?:\/\//.test(value)) {
+      return [value];
+    }
+  }
+  return [];
+};
 
 const fileReducer = (state: any, action: any) => {
   let whiteBaordFiles = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -66,15 +92,19 @@ const fileReducer = (state: any, action: any) => {
         }
         alert(t('toast.remove_page'));
         sendToRemote("", updatedFiles, "remove-page", pageId);
+        roomStore.updateWhiteboardUid(JSON.stringify(uploadedFilesFrom(updatedFiles))).catch(() => {});
         return updatedFiles;
       }
       return state;
     case 'upload-file':
+      const nextState = appendFile(state, action.fileId);
+      if (nextState === state) return state;
       sendToRemote("", action.fileId, "add-uploaded-page", "");
       roomStore.setUploadByme(1);
-      return [...state, action.fileId];
+      roomStore.updateWhiteboardUid(JSON.stringify(uploadedFilesFrom(nextState))).catch(() => {});
+      return nextState;
     case 'remote-add-page':
-      return [...state, action.fileId];
+      return appendFile(state, action.fileId);
     case 'remote-remove-page':
       document.getElementsByClassName('pdfViewer active')[0].previousElementSibling?.classList.add('active');
       return action.fileId;
@@ -159,6 +189,11 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
   }, []);
 
   const location = useLocation();
+  const isLiveReview = useMemo(() => Boolean(location.pathname.match(/one-to-one/)), [location.pathname]);
+  const canUseTools = useMemo(() => {
+    return me.role === 'teacher' || isLiveReview || Boolean(me.grantBoard);
+  }, [isLiveReview, me.grantBoard, me.role]);
+
   const showControl: boolean = useMemo(() => {
     if (me.role === 'teacher') return true;
     if (location.pathname.match(/big-class/) || location.pathname.match(/small-class/)) {
@@ -193,7 +228,20 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPage, setTotalPages] = useState(1);
+  const scrollSyncTimer = useRef<number | null>(null);
+  const lastScrollSentAt = useRef(0);
 
+  useEffect(() => {
+    const sharedFiles = [
+      ...parseSharedUploadedFiles(roomState.course.boardId),
+      ...roomState.users
+        .toArray()
+        .reduce((acc: string[], user: any) => acc.concat(parseSharedUploadedFiles(user.boardId)), []),
+    ];
+    sharedFiles.forEach((fileId: string) => {
+      dispatch({ type: 'remote-add-page', fileId });
+    });
+  }, [roomState.course.boardId, roomState.users]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -201,7 +249,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
 
   useEffect(() => {
     // disable all pdf effect on grandboard false
-    if(!Boolean(me.grantBoard)) {
+    if(!canUseTools) {
       let { UI } = PDFJSAnnotate;
       UI.disableEdit();
       UI.disablePen();
@@ -213,7 +261,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
       UI.disableEllipse();
       UI.disableRect();
       }    
-  },[me.grantBoard])
+  },[canUseTools])
 
   function getMostVisibleElement(selector: any) : any {
     let clientRect = null;
@@ -254,9 +302,25 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
   const handleScroll = () => {
 
     if(roomStore._state.me.role === "teacher") {
-      setTimeout(() => {
-    sendToRemote("", "", "sync-scroll", document.querySelector('.media-board.drawable')!.scrollTop);
-      }, 200);
+      const sendScrollPosition = () => {
+        const board = document.querySelector('.media-board.drawable') as HTMLElement | null;
+        if (!board) return;
+        lastScrollSentAt.current = Date.now();
+        sendToRemote("", "", "sync-scroll", board.scrollTop);
+      };
+      const elapsed = Date.now() - lastScrollSentAt.current;
+      if (elapsed >= 120) {
+        if (scrollSyncTimer.current) {
+          window.clearTimeout(scrollSyncTimer.current);
+          scrollSyncTimer.current = null;
+        }
+        sendScrollPosition();
+      } else if (!scrollSyncTimer.current) {
+        scrollSyncTimer.current = window.setTimeout(() => {
+          scrollSyncTimer.current = null;
+          sendScrollPosition();
+        }, 120 - elapsed);
+      }
 
     try {
       let elements = document.querySelectorAll('.pdfViewer.active');
@@ -290,7 +354,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
       }
       <div className="layer">
         <>
-          {me.role === 'teacher' ||  Boolean(me.grantBoard) ? <fileContext.Provider value={{pdfFiles: pdfFiles, fileDispatch: dispatch}}><Toolelements /></fileContext.Provider> : null}
+          {canUseTools ? <fileContext.Provider value={{pdfFiles: pdfFiles, fileDispatch: dispatch}}><Toolelements /></fileContext.Provider> : null}
         </>
         {children ? children : null}
       </div>

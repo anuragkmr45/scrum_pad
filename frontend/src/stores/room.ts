@@ -310,7 +310,6 @@ export class RoomStore {
   async handlePeerMessage(cmd: RoomMessage, peerId: string) {
     if (!peerId) return console.warn('state is not assigned');
     const myUid = this.state.me.uid;
-    console.log("Teacher: ", this.isTeacher(myUid), ", peerId: ", this.isStudent(peerId));
     // student follow teacher peer message
     if (!this.isTeacher(myUid) && this.isTeacher(peerId)) {
       switch (cmd) {
@@ -346,7 +345,6 @@ export class RoomStore {
           const applyUser = roomStore.state.users.get(`${peerId}`);
           if (applyUser) {
             this.applyLock = +peerId;
-            console.log("applyUid: ", this.applyLock);
             this.state = {
               ...this.state,
               applyUid: this.applyLock,
@@ -410,7 +408,6 @@ export class RoomStore {
 
   async loginAndJoin(payload: any, pass: boolean = false) {
     const { roomType, role, uid, rid, rtmToken } = payload;
-    console.log("payload: ", payload);
     let result = { permitted: true, reason: '' };
     await this.rtmClient.login(uid, rtmToken);
     try {
@@ -418,7 +415,6 @@ export class RoomStore {
       const channelCount = channelMemberCount[rid];
       let accounts: any = await this.rtmClient.getChannelAttributeBy(rid);
       const onlineStatus = await this.rtmClient.queryOnlineStatusBy(accounts);
-      console.log("onlineStatus", onlineStatus);
       const argsJoin = {
         channelCount,
         onlineStatus,
@@ -433,12 +429,12 @@ export class RoomStore {
         await this.updateMe({ ...payload, grantBoard });
         this.state = {
           ...this.state,
+          rtmToken: rtmToken || this.state.rtmToken,
           rtm: {
             ...this.state.rtm,
             joined: true
           },
         }
-        console.log("loginAndJoin>>>>: accounts", accounts);
         this.commit(this.state);
         return;
       }
@@ -456,12 +452,10 @@ export class RoomStore {
 
   async updateCourseLinkUid(linkId: number) {
     const me = this.state.me;
-    console.log("me: link_uid", me, linkId);
     let res = await this.updateMe({
       linkId,
     })
     this.applyLock = linkId;
-    console.log("current apply lock: ", this.applyLock);
     return res;
   }
 
@@ -470,7 +464,6 @@ export class RoomStore {
       let res = await this.updateMe({
         boardId
       });
-      console.log("[update whiteboard uuid] res", boardId);
       return res;
     } catch(err) {}
   }
@@ -501,7 +494,6 @@ export class RoomStore {
   }
 
   addPollVotes(votes: any) {
-    console.log(votes);
     this.state = {
       ...this.state,
       poll: {
@@ -545,7 +537,6 @@ export class RoomStore {
   
   addAnnouncementData(data: any) {
     
-    console.log(data);
     this.state = {
       ...this.state,
      announcement:{
@@ -591,7 +582,6 @@ export class RoomStore {
   }
 
   setFileData(data:any){
-    console.log(data)
     this.state={
       ...this.state,
       pdfData:{
@@ -606,7 +596,6 @@ export class RoomStore {
   
   
   private compositeMe(params: Partial<AgoraUser>): AgoraUser {
-    console.log("compositeMe: ", params);
     const newMe: AgoraUser = { ...this.state.me };
     for (const prop in params) {
       if (newMe.hasOwnProperty(prop) && params.hasOwnProperty(prop)) {
@@ -617,9 +606,7 @@ export class RoomStore {
   }
 
   private compositeCourse(params: Partial<ClassState>): ClassState {
-    console.log("compositeCourse: ", params);
     const newCourse = { ...this.state.course };
-    console.log('newCourse', newCourse)
     for (const prop in params) {
       if (newCourse.hasOwnProperty(prop) && params.hasOwnProperty(prop)) {
         set(newCourse, prop, get(params, prop, ''));
@@ -629,7 +616,6 @@ export class RoomStore {
   }
 
   private exactChannelAttrsBy(me: AgoraUser, course: ClassState): ChannelAttrs {
-    console.log("origin: ", me, course);
     const newChannelAttrs: ChannelAttrs = {
       uid: me.uid,
       account: `${me.account}`,
@@ -764,8 +750,6 @@ export class RoomStore {
       course: room
     } = this.exactChannelAttrsFrom(rawData);
 
-    console.log("origin", rawData);
-    console.log("origin exact", teacher, accounts, room);
     const users = accounts.reduce((acc: Map<string, AgoraUser>, it: any) => {
       return acc.set(it.uid, {
         role: it.role,

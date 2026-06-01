@@ -100,6 +100,18 @@ export async function checkBackendHealth() {
   }
 }
 
+export async function fetchAgoraRtmToken(uid: string) {
+  const baseUrl = getBackendBaseUrl();
+  if (!baseUrl || !uid) return '';
+
+  try {
+    const data = await backendRequest(`/api/agora/rtm-token?uid=${encodeURIComponent(uid)}`);
+    return data.token || '';
+  } catch (err) {
+    return '';
+  }
+}
+
 export function createWorkspace(payload: any) {
   return backendRequest('/api/workspaces', {
     method: 'POST',

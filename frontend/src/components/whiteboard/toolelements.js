@@ -460,7 +460,12 @@ const Toolelements = () => {
               <PublishIcon onClick = {handleFileUpload} className="icon items upload"
                />
                <span className="tooltiptext">Upload</span>
-            <input type="file" id="fileUpload" ref={inputFileRef} onChange={handleUpload}
+            <input
+            type="file"
+            id="fileUpload"
+            ref={inputFileRef}
+            onChange={handleUpload}
+            accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,.odt,.odp,.ods,.png,.jpg,.jpeg"
             style={{display: 'none'}}
             />
           </div>

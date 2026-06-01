@@ -14,6 +14,7 @@ import { t } from '../i18n';
 import {
   checkBackendHealth,
   createWorkspace,
+  fetchAgoraRtmToken,
   getHexscrumProfile,
   saveHexscrumProfile,
   setWorkspaceId,
@@ -82,7 +83,7 @@ function HomePage() {
     });
   }, []);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!hasAgoraAppId) {
       globalStore.showToast({
         type: 'rtmClient',
@@ -124,35 +125,41 @@ function HomePage() {
       lockBoard: 0,
       grantBoard: 0,
     }
-    const profile = saveHexscrumProfile({
-      userId: payload.uid,
-      name: session.yourName,
-      designation,
-      color: userColor,
-    });
-    setWorkspaceId(payload.rid);
-    createWorkspace({
-      id: payload.rid,
-      name: session.roomName,
-      ownerUserId: payload.uid,
-      metadata: {
-        roomType: session.roomType,
-        role: session.role,
-        userName: profile.name,
-        userDesignation: profile.designation,
-        userColor: profile.color,
-      },
-    }).catch(() => {});
-    ref.current = true;
-    globalStore.showLoading();
-    roomStore.loginAndJoin(payload).then(() => {
+    try {
+      const rtmToken = await fetchAgoraRtmToken(payload.uid);
+      const joinPayload = {
+        ...payload,
+        rtmToken,
+      };
+      const profile = saveHexscrumProfile({
+        userId: payload.uid,
+        name: session.yourName,
+        designation,
+        color: userColor,
+      });
+      setWorkspaceId(payload.rid);
+      createWorkspace({
+        id: payload.rid,
+        name: session.roomName,
+        ownerUserId: payload.uid,
+        metadata: {
+          roomType: session.roomType,
+          role: session.role,
+          userName: profile.name,
+          userDesignation: profile.designation,
+          userColor: profile.color,
+        },
+      }).catch(() => {});
+      ref.current = true;
+      globalStore.showLoading();
+      await roomStore.loginAndJoin(joinPayload);
       Object.keys(localStorage).forEach((key) => {
         if (key.indexOf('/annotations') !== -1) {
           localStorage.removeItem(`${key}`);
         }
       });
       history.push(`/classroom/${path}`);
-    }).catch((err: any) => {
+    } catch (err) {
       if (err.reason) {
         globalStore.showToast({
           type: 'rtmClient',
@@ -164,12 +171,10 @@ function HomePage() {
           message: t('toast.rtm_login_failed'),
         })
       }
-      console.warn(err);
-    })
-    .finally(() => {
-        ref.current = false;
-        globalStore.stopLoading();
-    })
+    } finally {
+      ref.current = false;
+      globalStore.stopLoading();
+    }
   }
 
   return (

@@ -39,7 +39,7 @@ fi
 
 echo
 echo "Checking for likely committed secrets..."
-if grep -RInE '(AWS_BUCKET_SECRET|AWS_BUCKET_KEY|CLOUDINARY_API_SECRET|CLOUDINARY_URL|DATABASE_URL|REACT_APP_AGORA_APP_ID)=.+[A-Za-z0-9_:/@?&=+.-]{12,}' \
+if grep -RInE '(AWS_BUCKET_SECRET|AWS_BUCKET_KEY|CLOUDINARY_API_SECRET|CLOUDINARY_URL|DATABASE_URL|AGORA_APP_CERTIFICATE|REACT_APP_AGORA_APP_ID)=.+[A-Za-z0-9_:/@?&=+.-]{12,}' \
   "$ROOT_DIR" \
   --exclude-dir=node_modules \
   --exclude-dir=.git \

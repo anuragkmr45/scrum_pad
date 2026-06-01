@@ -5,6 +5,7 @@
 node_modules/
 frontend/node_modules/
 converter-api/node_modules/
+converter-api/uploaded-files/
 frontend/build/
 converter-api/dist/
 npm-debug.log*

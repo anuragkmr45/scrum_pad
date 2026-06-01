@@ -28,5 +28,5 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 cd "$ROOT_DIR/converter-api"
-echo "Starting converter with npm run start..."
-npm run start
+echo "Starting converter with npm run dev..."
+npm run dev

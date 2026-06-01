@@ -6,6 +6,7 @@ import './room.scss';
 import { roomStore } from '../../stores/room';
 import { globalStore } from '../../stores/global';
 import { t } from '../../i18n';
+import { fetchAgoraRtmToken } from '../../utils/hexscrum-api';
 
 export const roomTypes = [
   {value: 0, text: 'One-on-One', path: 'one-to-one'},
@@ -54,12 +55,17 @@ export function RoomPage({ children }: any) {
     lock.current = true;
     if (roomStore.state.rtm.joined) return;
     globalStore.showLoading();
-    roomStore.loginAndJoin(payload, true).then(() => {
+    fetchAgoraRtmToken(uid)
+      .then((token: string) => roomStore.loginAndJoin({
+        ...payload,
+        rtmToken: token || rtmToken,
+      }, true))
+      .then(() => {
 
-    }).catch((err: any) => {
+      }).catch((err: any) => {
       globalStore.showToast({
         type: 'rtmClient',
-        message: t('toast.login_failure'),
+        message: err.reason || t('toast.login_failure'),
       });
       history.push('/');
     })

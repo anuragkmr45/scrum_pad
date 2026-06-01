@@ -2,7 +2,7 @@ const express = require("express");
 const fileUpload = require("express-fileupload");
 const path = require("path");
 const fs = require("fs");
-const { spawnSync } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const randomstring = require("randomstring");
 const PDFDocument = require("pdfkit");
 const cloudinary = require("cloudinary").v2;
@@ -10,6 +10,7 @@ require("dotenv").config();
 
 const unoconv = require("./dist");
 const auditStore = require("./audit-store");
+const { RtmTokenBuilder, RtmRole } = require("agora-access-token");
 
 const PORT = process.env.PORT || 4000;
 const storageProvider = (process.env.STORAGE_PROVIDER || "cloudinary").toLowerCase();
@@ -18,9 +19,21 @@ const configuredMaxUploadMb = Number(process.env.MAX_UPLOAD_MB || 25);
 const maxUploadMb = Number.isFinite(configuredMaxUploadMb) && configuredMaxUploadMb > 0 ? configuredMaxUploadMb : 25;
 const maxUploadBytes = maxUploadMb * 1024 * 1024;
 const uploadDir = path.resolve("./test");
+const publicUploadDir = path.resolve(process.env.LOCAL_UPLOAD_DIR || "./uploaded-files");
+const agoraAppId = process.env.AGORA_APP_ID || "";
+const agoraAppCertificate = process.env.AGORA_APP_CERTIFICATE || "";
+const configuredAgoraTokenTtlSeconds = Number(process.env.AGORA_RTM_TOKEN_TTL_SECONDS || 3600);
+const agoraTokenTtlSeconds =
+  Number.isFinite(configuredAgoraTokenTtlSeconds) && configuredAgoraTokenTtlSeconds > 0
+    ? configuredAgoraTokenTtlSeconds
+    : 3600;
 
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+if (!fs.existsSync(publicUploadDir)) {
+  fs.mkdirSync(publicUploadDir, { recursive: true });
 }
 
 const cloudinaryConfigured = Boolean(
@@ -30,15 +43,55 @@ const cloudinaryConfigured = Boolean(
       process.env.CLOUDINARY_API_SECRET)
 );
 
-if (cloudinaryConfigured && !process.env.CLOUDINARY_URL) {
+function cloudinaryConfigFromEnv() {
+  if (
+    process.env.CLOUDINARY_CLOUD_NAME &&
+    process.env.CLOUDINARY_API_KEY &&
+    process.env.CLOUDINARY_API_SECRET
+  ) {
+    return {
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET
+    };
+  }
+
+  if (process.env.CLOUDINARY_URL) {
+    try {
+      const parsed = new URL(process.env.CLOUDINARY_URL);
+      return {
+        cloud_name: parsed.hostname,
+        api_key: decodeURIComponent(parsed.username),
+        api_secret: decodeURIComponent(parsed.password)
+      };
+    } catch (err) {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+const cloudinaryRuntimeConfig = cloudinaryConfigFromEnv();
+const cloudinaryReady = Boolean(
+  cloudinaryRuntimeConfig &&
+    cloudinaryRuntimeConfig.cloud_name &&
+    cloudinaryRuntimeConfig.api_key &&
+    cloudinaryRuntimeConfig.api_secret
+);
+
+if (cloudinaryReady) {
+  cloudinary.config({
+    ...cloudinaryRuntimeConfig,
+    secure: true
+  });
+} else if (cloudinaryConfigured) {
   cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
     api_secret: process.env.CLOUDINARY_API_SECRET,
     secure: true
   });
-} else if (process.env.CLOUDINARY_URL) {
-  cloudinary.config({ secure: true });
 }
 
 const allowedExtensions = new Set([
@@ -86,8 +139,31 @@ function converterAvailable() {
 }
 
 function storageConfigured() {
-  if (storageProvider === "cloudinary") return cloudinaryConfigured;
+  if (storageProvider === "cloudinary") return cloudinaryReady;
   return false;
+}
+
+function agoraTokenConfigured() {
+  return Boolean(agoraAppId && agoraAppCertificate);
+}
+
+function buildAgoraRtmToken(uid) {
+  const account = String(uid || "").trim();
+  if (!account || account.length > 64) {
+    const err = new Error("invalid_agora_uid");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const expiresAt = Math.floor(Date.now() / 1000) + agoraTokenTtlSeconds;
+  const token = RtmTokenBuilder.buildToken(
+    agoraAppId,
+    agoraAppCertificate,
+    account,
+    RtmRole.Rtm_User,
+    expiresAt
+  );
+  return { token, expiresAt };
 }
 
 function allowedOrigins() {
@@ -148,6 +224,16 @@ function moveUploadedFile(file, destination) {
   });
 }
 
+function copyFile(source, destination) {
+  return fs.promises.copyFile(source, destination);
+}
+
+function publicFileUrl(req, fileName) {
+  const proto = req.get("x-forwarded-proto") || req.protocol || "http";
+  const host = req.get("host");
+  return `${proto}://${host}/files/${encodeURIComponent(fileName)}`;
+}
+
 function deleteFile(filepath) {
   if (!filepath) return;
   fs.unlink(filepath, function(err) {
@@ -159,6 +245,82 @@ function deleteFile(filepath) {
 
 function convertWithUnoconv(inputPath, outputPath) {
   return unoconv.convert(inputPath, outputPath);
+}
+
+function runCommand(command, args, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGKILL");
+      reject(new Error("conversion_timeout"));
+    }, timeoutMs);
+
+    child.stderr.on("data", chunk => {
+      stderr += chunk.toString();
+    });
+    child.on("error", err => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on("close", code => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code === 0) return resolve();
+      const error = new Error(stderr.trim() || `${command} exited with code ${code}`);
+      error.code = code;
+      return reject(error);
+    });
+  });
+}
+
+async function convertWithLibreOffice(inputPath, outputPath) {
+  const command = commandExists("libreoffice") ? "libreoffice" : commandExists("soffice") ? "soffice" : "";
+  if (!command) {
+    throw new Error("converter_not_available");
+  }
+
+  const outputDir = path.dirname(outputPath);
+  const generatedPath = path.join(outputDir, `${path.basename(inputPath, path.extname(inputPath))}.pdf`);
+  await runCommand(command, [
+    "--headless",
+    "--nologo",
+    "--nofirststartwizard",
+    "--convert-to",
+    "pdf",
+    "--outdir",
+    outputDir,
+    inputPath
+  ]);
+
+  if (fs.existsSync(outputPath)) return;
+  if (fs.existsSync(generatedPath)) {
+    await fs.promises.rename(generatedPath, outputPath);
+    return;
+  }
+
+  throw new Error("conversion_output_missing");
+}
+
+async function convertOfficeToPdf(inputPath, outputPath) {
+  if (commandExists("unoconv")) {
+    try {
+      await convertWithUnoconv(inputPath, outputPath);
+      return;
+    } catch (err) {
+      if (!commandExists("libreoffice") && !commandExists("soffice")) {
+        throw err;
+      }
+      console.warn("unoconv failed; falling back to LibreOffice:", err.message);
+    }
+  }
+  await convertWithLibreOffice(inputPath, outputPath);
 }
 
 function convertImageToPdf(inputPath, outputPath) {
@@ -182,10 +344,13 @@ function convertImageToPdf(inputPath, outputPath) {
 }
 
 async function uploadToCloudinary(filePath, publicId, contentType) {
+  const isPdf = contentType === "application/pdf";
+  const cloudinaryPublicId =
+    isPdf && !publicId.toLowerCase().endsWith(".pdf") ? `${publicId}.pdf` : publicId;
   const result = await cloudinary.uploader.upload(filePath, {
     folder: cloudinaryFolder,
-    public_id: publicId,
-    resource_type: "auto",
+    public_id: cloudinaryPublicId,
+    resource_type: isPdf ? "raw" : "auto",
     use_filename: false,
     unique_filename: true,
     type: "upload"
@@ -202,7 +367,7 @@ async function uploadToCloudinary(filePath, publicId, contentType) {
 
 async function uploadOutput(filePath, publicId, contentType) {
   if (storageProvider === "cloudinary") {
-    if (!cloudinaryConfigured) {
+    if (!cloudinaryReady) {
       throw new Error("cloudinary_not_configured");
     }
     return uploadToCloudinary(filePath, publicId, contentType);
@@ -225,7 +390,7 @@ async function preparePdf(inputPath, outputPath, ext) {
     if (!converterAvailable()) {
       throw new Error("converter_not_available");
     }
-    await convertWithUnoconv(inputPath, outputPath);
+    await convertOfficeToPdf(inputPath, outputPath);
     return { outputPath, converted: true, contentType: "application/pdf" };
   }
 
@@ -235,12 +400,24 @@ async function preparePdf(inputPath, outputPath, ext) {
 const app = express();
 let schemaInitError = null;
 
+app.set("trust proxy", true);
+
 auditStore.initSchema().catch(err => {
   schemaInitError = err;
   console.warn("Audit schema initialization skipped or failed:", err.message);
 });
 
 app.use(corsMiddleware);
+app.use(
+  "/files",
+  express.static(publicUploadDir, {
+    setHeaders(res) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.setHeader("Cache-Control", "private, max-age=3600");
+    }
+  })
+);
 app.use(express.json({ limit: "1mb" }));
 app.use(
   fileUpload({
@@ -262,12 +439,40 @@ app.get(
       databaseConfigured: db.configured,
       databaseOk: db.ok,
       databaseMode: db.mode,
-      cloudinaryConfigured,
+      cloudinaryConfigured: cloudinaryReady,
+      cloudinaryEnvPresent: cloudinaryConfigured,
+      agoraRtmTokenConfigured: agoraTokenConfigured(),
       converterAvailable: converterAvailable(),
       uploadField: "sampleFile",
       maxUploadMb,
       auditSchemaReady: !schemaInitError
     });
+  })
+);
+
+app.get(
+  "/api/agora/rtm-token",
+  asyncRoute(async function(req, res) {
+    if (!agoraTokenConfigured()) {
+      return res.status(501).json({
+        error:
+          "Agora RTM token generation is not configured. Set AGORA_APP_ID and AGORA_APP_CERTIFICATE on the backend."
+      });
+    }
+
+    const uid = String(req.query.uid || "").trim();
+    try {
+      const result = buildAgoraRtmToken(uid);
+      return res.status(200).json({
+        uid,
+        token: result.token,
+        expiresAt: result.expiresAt
+      });
+    } catch (err) {
+      return res.status(err.statusCode || 400).json({
+        error: "Invalid Agora RTM uid. Use a non-empty uid up to 64 characters."
+      });
+    }
   })
 );
 
@@ -307,24 +512,30 @@ app.post(
     const inputPath = path.resolve(uploadDir, `${randomStr}-${safeName}`);
     const outputPath = path.resolve(uploadDir, `${randomStr}.pdf`);
     const publicId = `${Date.now()}-${randomStr}`;
+    const publicFileName = `${publicId}.pdf`;
     let prepared;
 
     try {
       await moveUploadedFile(sampleFile, inputPath);
       prepared = await preparePdf(inputPath, outputPath, ext);
       const upload = await uploadOutput(prepared.outputPath, publicId, prepared.contentType);
+      const publicPath = path.join(publicUploadDir, publicFileName);
+      await copyFile(prepared.outputPath, publicPath);
+      const servedPdfUrl = publicFileUrl(req, publicFileName);
       const document = req.body.workspaceId
         ? await auditStore.createDocument({
             workspaceId: req.body.workspaceId,
             originalFileName: safeName,
             sourceMimeType: sampleFile.mimetype || "",
-            storageUrl: upload.secure_url || upload.url,
-            convertedPdfUrl: upload.secure_url || upload.url,
+            storageUrl: servedPdfUrl,
+            convertedPdfUrl: servedPdfUrl,
             uploadedByUserId: req.body.userId || "",
             metadata: {
               size: sampleFile.size,
               converted: prepared.converted,
               storageProvider,
+              cloudinaryUrl: upload.secure_url || upload.url,
+              cloudinaryPublicId: upload.publicId || "",
               originalMimeType: sampleFile.mimetype || "",
               uploaderName: req.body.userName || "",
               uploaderDesignation: req.body.userDesignation || ""
@@ -333,9 +544,10 @@ app.post(
         : null;
 
       return res.status(200).json({
-        url: upload.secure_url || upload.url,
-        secure_url: upload.secure_url || upload.url,
-        storageProvider: upload.provider,
+        url: servedPdfUrl,
+        secure_url: servedPdfUrl,
+        cloudinary_url: upload.secure_url || upload.url,
+        storageProvider: `${upload.provider}+backend-files`,
         originalName: safeName,
         mimeType: sampleFile.mimetype || "",
         size: sampleFile.size,

@@ -42,19 +42,26 @@ FRONTEND_ORIGIN=http://localhost:3000
 CORS_ORIGINS=http://localhost:3000
 MAX_UPLOAD_MB=25
 STORAGE_PROVIDER=cloudinary
+LOCAL_UPLOAD_DIR=./uploaded-files
 CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
 CLOUDINARY_FOLDER=hexscrum-workspace
 DATABASE_URL=
 DATABASE_SSL=true
+AGORA_APP_ID=
+AGORA_APP_CERTIFICATE=
+AGORA_RTM_TOKEN_TTL_SECONDS=3600
 ```
 
 `CLOUDINARY_URL` may be used instead of the three individual Cloudinary fields.
+`LOCAL_UPLOAD_DIR` stores backend-served PDF copies used by the frontend whiteboard.
+`AGORA_APP_CERTIFICATE` is required when App Certificate/dynamic key is enabled in Agora.
 
 ## Endpoints
 
 - `GET /health`
+- `GET /api/agora/rtm-token?uid=...`
 - `POST /upload`
 - `POST /api/workspaces`
 - `GET /api/workspaces/:id`
