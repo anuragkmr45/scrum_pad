@@ -99,7 +99,7 @@
   },
   "scripts": {
     "dev": "cross-env NODE_OPTIONS=--openssl-legacy-provider REACT_APP_RUNTIME_PLATFORM=web react-app-rewired start",
-    "build": "cross-env NODE_OPTIONS=--openssl-legacy-provider ENV=production REACT_APP_RUNTIME_PLATFORM=web react-app-rewired build",
+    "build": "cross-env CI=false NODE_OPTIONS=--openssl-legacy-provider ENV=production REACT_APP_RUNTIME_PLATFORM=web react-app-rewired build",
     "test": "react-app-rewired test --env=jsdom",
     "analyze": "source-map-explorer 'build/static/js/*.js'",
     "eject": "react-scripts eject"
