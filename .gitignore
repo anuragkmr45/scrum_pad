@@ -1,0 +1,11 @@
+.env
+.env.local
+.git-nested-backups/
+.playwright-mcp/
+node_modules/
+frontend/node_modules/
+converter-api/node_modules/
+frontend/build/
+converter-api/dist/
+npm-debug.log*
+.DS_Store

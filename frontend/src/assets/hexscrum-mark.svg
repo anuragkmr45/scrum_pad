@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="HexScrum Workspace">
+  <rect width="512" height="512" rx="96" fill="#0F172A"/>
+  <path d="M256 72 414 163v186L256 440 98 349V163L256 72Z" fill="#2563EB"/>
+  <path d="M256 114 377 184v144L256 398 135 328V184l121-70Z" fill="#06B6D4"/>
+  <path d="M177 208h158v38H177v-38Zm0 63h111v38H177v-38Z" fill="#FFFFFF"/>
+</svg>
