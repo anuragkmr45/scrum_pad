@@ -6,7 +6,14 @@ import './room.scss';
 import { roomStore } from '../../stores/room';
 import { globalStore } from '../../stores/global';
 import { t } from '../../i18n';
-import { fetchAgoraRtmToken } from '../../utils/hexscrum-api';
+import {
+  endWorkspace,
+  fetchAgoraRtmToken,
+  getCurrentUser,
+  getHexscrumProfile,
+  heartbeatWorkspacePresence,
+  releaseWorkspaceLeadLock,
+} from '../../utils/hexscrum-api';
 
 export const roomTypes = [
   {value: 0, text: 'Live Workspace', path: 'one-to-one'},
@@ -19,6 +26,19 @@ export function RoomPage({ children }: any) {
   const history = useHistory();
 
   const lock = useRef<boolean>(false);
+  const presenceTimer = useRef<number | null>(null);
+
+  const sendPresenceHeartbeat = () => {
+    const user = getCurrentUser();
+    const profile = getHexscrumProfile();
+    const room = roomStore.state;
+    const workspaceId = room.course.rid;
+    if (!user || !workspaceId || !room.me.uid) return;
+    heartbeatWorkspacePresence(workspaceId, {
+      role: room.me.role === 'teacher' ? 'lead' : 'reviewer',
+      color: profile.color || user.color,
+    }).catch(() => {});
+  };
 
   useEffect(() => {
 
@@ -61,6 +81,11 @@ export function RoomPage({ children }: any) {
         rtmToken: token || rtmToken,
       }, true))
       .then(() => {
+        sendPresenceHeartbeat();
+        if (presenceTimer.current) {
+          window.clearInterval(presenceTimer.current);
+        }
+        presenceTimer.current = window.setInterval(sendPresenceHeartbeat, 20000);
 
       }).catch((err: any) => {
       globalStore.showToast({
@@ -81,6 +106,25 @@ export function RoomPage({ children }: any) {
 
   useEffect(() => {
     return () => {
+      if (presenceTimer.current) {
+        window.clearInterval(presenceTimer.current);
+        presenceTimer.current = null;
+      }
+      const room = roomStore.state;
+      const isLeadLeavingWorkspace =
+        room.me.role === 'teacher' &&
+        Boolean(room.course.rid) &&
+        Boolean(location.pathname.match(/one-to-one/));
+      if (isLeadLeavingWorkspace) {
+        const workspaceId = room.course.rid;
+        endWorkspace(workspaceId).catch(() => {});
+        releaseWorkspaceLeadLock(workspaceId).catch(() => {});
+        roomStore.rtmClient.sendChannelMessage(JSON.stringify({
+          type: 'workspace-ended',
+          workspaceId,
+          endedBy: room.me.uid,
+        })).catch(() => {});
+      }
       globalStore.removeUploadNotice();
       roomStore.exitAll()
       .then(() => {

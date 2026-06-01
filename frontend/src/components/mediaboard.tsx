@@ -190,20 +190,21 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
 
   const location = useLocation();
   const isLiveReview = useMemo(() => Boolean(location.pathname.match(/one-to-one/)), [location.pathname]);
-  const canUseTools = useMemo(() => {
+  const canAnnotate = useMemo(() => {
     return me.role === 'teacher' || isLiveReview || Boolean(me.grantBoard);
   }, [isLiveReview, me.grantBoard, me.role]);
+  const canManageWorkspace = useMemo(() => me.role === 'teacher', [me.role]);
 
   const showControl: boolean = useMemo(() => {
     if (me.role === 'teacher') return true;
-    if (isLiveReview && canUseTools) return true;
+    if (isLiveReview && canAnnotate) return true;
     if (location.pathname.match(/big-class/) || location.pathname.match(/small-class/)) {
       if (me.role === 'student') {
         return true;
       }
     }
     return false;
-  }, [canUseTools, isLiveReview, location.pathname, me.role]);
+  }, [canAnnotate, isLiveReview, location.pathname, me.role]);
 
   const drawable: string = useMemo(() => {
     if (location.pathname.match('small-class|big-class')) {
@@ -250,7 +251,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
 
   useEffect(() => {
     // disable all pdf effect on grandboard false
-    if(!canUseTools) {
+    if(!canAnnotate) {
       let { UI } = PDFJSAnnotate;
       UI.disableEdit();
       UI.disablePen();
@@ -262,7 +263,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
       UI.disableEllipse();
       UI.disableRect();
       }    
-  },[canUseTools])
+  },[canAnnotate])
 
   function getMostVisibleElement(selector: any) : any {
     let clientRect = null;
@@ -302,7 +303,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
 
   const handleScroll = () => {
 
-    if(canUseTools && !(window as any).__hexscrumApplyingRemoteScroll) {
+    if(canManageWorkspace && !(window as any).__hexscrumApplyingRemoteScroll) {
       const sendScrollPosition = () => {
         const board = document.querySelector('.media-board') as HTMLElement | null;
         if (!board) return;
@@ -355,12 +356,12 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
       }
       <div className="layer">
         <>
-          {canUseTools ? <fileContext.Provider value={{pdfFiles: pdfFiles, fileDispatch: dispatch}}><Toolelements /></fileContext.Provider> : null}
+          {canAnnotate ? <fileContext.Provider value={{pdfFiles: pdfFiles, fileDispatch: dispatch, canManageWorkspace}}><Toolelements /></fileContext.Provider> : null}
         </>
         {children ? children : null}
       </div>
       { showControl ?
-      <fileContext.Provider value={{pdfFiles: pdfFiles, fileDispatch: dispatch, setTotalPages: setTotalPages}}>
+      <fileContext.Provider value={{pdfFiles: pdfFiles, fileDispatch: dispatch, setTotalPages: setTotalPages, canAnnotate, canManageWorkspace}}>
       <Control
         isHost={isHost}
         notice={globalState.notice}

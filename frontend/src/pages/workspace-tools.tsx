@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useHistory } from 'react-router-dom';
 import {
   generateArchive,
   getAnnotationHistory,
+  getAnnotationTimeline,
   getBackendBaseUrl,
+  getCurrentUser,
   getHexscrumProfile,
   getMeetingNotes,
   getUserWiseReport,
@@ -53,15 +55,25 @@ function notesAsHtml(notes: any[]) {
 function WorkspaceTools() {
   document.title = 'HexScrum Notes & Reports';
 
+  const routerHistory = useHistory();
+  const currentUser = getCurrentUser();
   const profile = getHexscrumProfile();
   const [workspaceId, updateWorkspaceId] = useState<string>(getWorkspaceId());
   const [noteBody, setNoteBody] = useState<string>('');
   const [notes, setNotes] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string>('');
+  const [annotationTimeline, setAnnotationTimeline] = useState<any[]>([]);
   const [userReport, setUserReport] = useState<any[]>([]);
   const [archive, setArchive] = useState<any>(null);
   const [status, setStatus] = useState<string>('');
   const backendUrl = getBackendBaseUrl();
+
+  useEffect(() => {
+    if (!currentUser) {
+      routerHistory.push('/');
+    }
+  }, [currentUser, routerHistory]);
 
   const rememberWorkspace = (value: string) => {
     updateWorkspaceId(value);
@@ -79,6 +91,20 @@ function WorkspaceTools() {
     if (!workspaceId) return;
     getAnnotationHistory(workspaceId)
       .then((data: any) => setHistory(data.report || []))
+      .catch((err: any) => setStatus(err.message));
+  };
+
+  const loadAnnotationTimeline = (annotationId: string) => {
+    if (!workspaceId || !annotationId) {
+      setStatus('This event does not have an annotation id.');
+      return;
+    }
+    setSelectedAnnotationId(annotationId);
+    getAnnotationTimeline(workspaceId, annotationId)
+      .then((data: any) => {
+        setAnnotationTimeline(data.events || []);
+        setStatus((data.events || []).length ? 'Timeline loaded' : 'No timeline found for this annotation.');
+      })
       .catch((err: any) => setStatus(err.message));
   };
 
@@ -205,12 +231,61 @@ function WorkspaceTools() {
             </thead>
             <tbody>
               {history.map((row, index) => (
-                <tr key={`${row.annotationId}-${index}`}>
+                <tr
+                  key={`${row.annotationId}-${index}`}
+                  className={row.annotationId === selectedAnnotationId ? 'selected' : ''}
+                  onClick={() => loadAnnotationTimeline(row.annotationId)}
+                >
                   {historyColumns.map(column => <td key={column}>{row[column]}</td>)}
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="annotation-timeline-panel">
+          <div className="timeline-header">
+            <div>
+              <span className="eyebrow">Annotation timeline</span>
+              <h3>{selectedAnnotationId || 'Select an annotation row'}</h3>
+            </div>
+            <strong>{annotationTimeline.length}</strong>
+          </div>
+          {annotationTimeline.length ? (
+            <ol className="annotation-timeline-list">
+              {annotationTimeline.map((event, index) => (
+                <li key={event.id || `${event.annotationId}-${index}`}>
+                  <div className="timeline-dot" style={{ background: event.userColor || '#EB5E28' }} />
+                  <article>
+                    <header>
+                      <strong>{event.action || 'event'} · {event.toolType || 'tool'}</strong>
+                      <span>{event.timestamp || ''}</span>
+                    </header>
+                    <p>{event.userName || 'Unknown'} {event.userDesignation ? `- ${event.userDesignation}` : ''}</p>
+                    <dl>
+                      <div>
+                        <dt>Page</dt>
+                        <dd>{event.pageNumber || 1}</dd>
+                      </div>
+                      <div>
+                        <dt>Document</dt>
+                        <dd>{event.documentId || '-'}</dd>
+                      </div>
+                    </dl>
+                    <details>
+                      <summary>State payload</summary>
+                      <pre>{JSON.stringify({
+                        payload: event.payload || {},
+                        beforeState: event.beforeState || null,
+                        afterState: event.afterState || null,
+                      }, null, 2)}</pre>
+                    </details>
+                  </article>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="empty-state">Click an annotation history row to inspect who created, updated, or deleted it and what state was recorded.</p>
+          )}
         </div>
       </section>
 

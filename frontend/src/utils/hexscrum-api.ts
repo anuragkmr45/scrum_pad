@@ -5,8 +5,17 @@ export type HexscrumProfile = {
   color: string
 }
 
+export type HexscrumAuthUser = {
+  id: string
+  name: string
+  email: string
+  designation: string
+  color: string
+}
+
 const PROFILE_KEY = 'hexscrum_profile';
 const WORKSPACE_ID_KEY = 'hexscrum_workspace_id';
+const AUTH_SESSION_KEY = 'hexscrum_auth_session';
 const DEFAULT_COLOR = '#EB5E28';
 const LEGACY_DEFAULT_COLOR = '#2563EB';
 
@@ -52,6 +61,41 @@ export function saveHexscrumProfile(profile: Partial<HexscrumProfile>) {
   return next;
 }
 
+export function getAuthSession() {
+  const session = readJson(AUTH_SESSION_KEY);
+  if (!session || !session.token || !session.user) return null;
+  return session as { token: string, user: HexscrumAuthUser };
+}
+
+export function getAuthToken() {
+  const session = getAuthSession();
+  return session ? session.token : '';
+}
+
+export function getCurrentUser() {
+  const session = getAuthSession();
+  return session ? session.user : null;
+}
+
+export function saveAuthSession(session: { token: string, user: HexscrumAuthUser }) {
+  writeJson(AUTH_SESSION_KEY, session);
+  saveHexscrumProfile({
+    userId: session.user.id,
+    name: session.user.name,
+    designation: session.user.designation,
+    color: session.user.color,
+  });
+  return session;
+}
+
+export function clearAuthSession() {
+  try {
+    window.localStorage.removeItem(AUTH_SESSION_KEY);
+    window.localStorage.removeItem(WORKSPACE_ID_KEY);
+    window.localStorage.removeItem(PROFILE_KEY);
+  } catch (err) {}
+}
+
 export function getWorkspaceId() {
   try {
     return window.localStorage.getItem(WORKSPACE_ID_KEY) || '';
@@ -75,6 +119,10 @@ export async function backendRequest(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers || {});
   if (!(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
+  }
+  const token = getAuthToken();
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
   }
 
   const response = await fetch(`${baseUrl}${path}`, {
@@ -117,11 +165,83 @@ export async function fetchAgoraRtmToken(uid: string) {
   }
 }
 
+export async function registerUser(payload: any) {
+  const data = await backendRequest('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return saveAuthSession(data);
+}
+
+export async function loginUser(payload: any) {
+  const data = await backendRequest('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return saveAuthSession(data);
+}
+
+export async function fetchCurrentUser() {
+  const data = await backendRequest('/api/auth/me');
+  const session = getAuthSession();
+  if (session && data.user) {
+    return saveAuthSession({
+      token: session.token,
+      user: data.user,
+    });
+  }
+  return data;
+}
+
+export function listMyWorkspaces() {
+  return backendRequest('/api/workspaces');
+}
+
+export function searchUsers(query: string) {
+  return backendRequest(`/api/users?q=${encodeURIComponent(query)}`);
+}
+
 export function createWorkspace(payload: any) {
   return backendRequest('/api/workspaces', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+export function inviteWorkspaceUser(workspaceId: string, payload: any) {
+  return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/invites`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function endWorkspace(workspaceId: string) {
+  return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/end`, {
+    method: 'POST',
+  });
+}
+
+export function acquireWorkspaceLeadLock(workspaceId: string) {
+  return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/lead-lock`, {
+    method: 'POST',
+  });
+}
+
+export function releaseWorkspaceLeadLock(workspaceId: string) {
+  return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/lead-lock`, {
+    method: 'DELETE',
+  });
+}
+
+export function heartbeatWorkspacePresence(workspaceId: string, payload: any) {
+  return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/presence`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getWorkspacePresence(workspaceId: string) {
+  return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/presence`);
 }
 
 export function postAnnotationEvent(payload: any) {
@@ -133,6 +253,14 @@ export function postAnnotationEvent(payload: any) {
 
 export function getAnnotationHistory(workspaceId: string) {
   return backendRequest(`/api/reports/annotation-history?workspaceId=${encodeURIComponent(workspaceId)}`);
+}
+
+export function getRecentAnnotationEvents(workspaceId: string) {
+  return backendRequest(`/api/annotations/recent?workspaceId=${encodeURIComponent(workspaceId)}`);
+}
+
+export function getAnnotationTimeline(workspaceId: string, annotationId: string) {
+  return backendRequest(`/api/annotations/${encodeURIComponent(annotationId)}/timeline?workspaceId=${encodeURIComponent(workspaceId)}`);
 }
 
 export function getUserWiseReport(workspaceId: string) {

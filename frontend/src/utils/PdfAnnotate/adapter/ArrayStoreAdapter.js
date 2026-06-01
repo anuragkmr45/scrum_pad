@@ -83,15 +83,13 @@ export default class ArrayStoreAdapter {
 
   deleteAnnotation(documentId, annotationId) {
     return new Promise((resolve, reject) => {
+      let annotations = getAnnotations(documentId);
       let index = findAnnotation(documentId, annotationId);
       if (index > -1) {
-        let annotations = getAnnotations(documentId);
         annotations.splice(index, 1);
         updateAnnotations(documentId, annotations);
-        resolve(annotations);
       }
-
-      resolve(true);
+      resolve(annotations);
     });
   }
 }

@@ -2,6 +2,7 @@ const express = require("express");
 const fileUpload = require("express-fileupload");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { pathToFileURL } = require("url");
 const { spawn, spawnSync } = require("child_process");
 const randomstring = require("randomstring");
@@ -24,6 +25,12 @@ const uploadDir = path.resolve("./test");
 const publicUploadDir = path.resolve(process.env.LOCAL_UPLOAD_DIR || "./uploaded-files");
 const agoraAppId = process.env.AGORA_APP_ID || "";
 const agoraAppCertificate = process.env.AGORA_APP_CERTIFICATE || "";
+const authSecret =
+  process.env.AUTH_SECRET ||
+  process.env.AGORA_APP_CERTIFICATE ||
+  process.env.CLOUDINARY_API_SECRET ||
+  "hexscrum-dev-auth-secret";
+const authSecretConfigured = Boolean(process.env.AUTH_SECRET);
 const configuredAgoraTokenTtlSeconds = Number(process.env.AGORA_RTM_TOKEN_TTL_SECONDS || 3600);
 const agoraTokenTtlSeconds =
   Number.isFinite(configuredAgoraTokenTtlSeconds) && configuredAgoraTokenTtlSeconds > 0
@@ -166,6 +173,76 @@ function buildAgoraRtmToken(uid) {
     expiresAt
   );
   return { token, expiresAt };
+}
+
+function base64UrlEncode(value) {
+  return Buffer.from(value)
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}
+
+function base64UrlDecode(value) {
+  const padded = `${value}${"=".repeat((4 - (value.length % 4)) % 4)}`;
+  return Buffer.from(padded.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+}
+
+function signTokenSegment(value) {
+  return base64UrlEncode(crypto.createHmac("sha256", authSecret).update(value).digest());
+}
+
+function createAuthToken(user) {
+  const header = base64UrlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const payload = base64UrlEncode(
+    JSON.stringify({
+      sub: user.id,
+      email: user.email,
+      name: user.name,
+      exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7
+    })
+  );
+  const body = `${header}.${payload}`;
+  return `${body}.${signTokenSegment(body)}`;
+}
+
+function verifyAuthToken(token) {
+  const parts = String(token || "").split(".");
+  if (parts.length !== 3) return null;
+  const body = `${parts[0]}.${parts[1]}`;
+  const expected = signTokenSegment(body);
+  const actual = parts[2];
+  if (
+    expected.length !== actual.length ||
+    !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(actual))
+  ) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(base64UrlDecode(parts[1]));
+    if (!payload.sub || !payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return payload;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function readAuthUser(req) {
+  const auth = String(req.headers.authorization || "");
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+  const payload = verifyAuthToken(match[1]);
+  if (!payload) return null;
+  return auditStore.getUserById(payload.sub);
+}
+
+function requireAuth(handler) {
+  return asyncRoute(async function(req, res, next) {
+    const user = await readAuthUser(req);
+    if (!user) return res.status(401).json({ error: "Authentication required." });
+    req.user = user;
+    return handler(req, res, next);
+  });
 }
 
 function allowedOrigins() {
@@ -475,14 +552,110 @@ app.get(
       databaseConfigured: db.configured,
       databaseOk: db.ok,
       databaseMode: db.mode,
+      upstashConfigured: db.upstashConfigured,
+      workspaceCacheTtlSeconds: db.workspaceCacheTtlSeconds,
+      workspacePresenceTtlSeconds: db.workspacePresenceTtlSeconds,
+      workspaceLeadLockTtlSeconds: db.workspaceLeadLockTtlSeconds,
       cloudinaryConfigured: cloudinaryReady,
       cloudinaryEnvPresent: cloudinaryConfigured,
       agoraRtmTokenConfigured: agoraTokenConfigured(),
+      authSecretConfigured,
       converterAvailable: converterAvailable(),
       uploadField: "sampleFile",
       maxUploadMb,
       auditSchemaReady: !schemaInitError
     });
+  })
+);
+
+app.post(
+  "/api/auth/register",
+  asyncRoute(async function(req, res) {
+    const user = await auditStore.createAuthUser(req.body || {});
+    return res.status(201).json({
+      user,
+      token: createAuthToken(user)
+    });
+  })
+);
+
+app.post(
+  "/api/auth/login",
+  asyncRoute(async function(req, res) {
+    const user = await auditStore.authenticateUser(req.body.email || "", req.body.password || "");
+    return res.status(200).json({
+      user,
+      token: createAuthToken(user)
+    });
+  })
+);
+
+app.get(
+  "/api/auth/me",
+  requireAuth(async function(req, res) {
+    return res.status(200).json({ user: req.user });
+  })
+);
+
+app.get(
+  "/api/users",
+  requireAuth(async function(req, res) {
+    const users = await auditStore.listUsers(req.query.q || req.query.search || "");
+    return res.status(200).json({ users });
+  })
+);
+
+app.get(
+  "/api/workspaces",
+  requireAuth(async function(req, res) {
+    const result = await auditStore.listWorkspacesForUser(req.user.id);
+    return res.status(200).json(result);
+  })
+);
+
+app.post(
+  "/api/workspaces/:id/lead-lock",
+  requireAuth(async function(req, res) {
+    const result = await auditStore.acquireLeadLock({
+      workspaceId: req.params.id,
+      userId: req.user.id
+    });
+    return res.status(result.acquired ? 200 : 409).json(result);
+  })
+);
+
+app.delete(
+  "/api/workspaces/:id/lead-lock",
+  requireAuth(async function(req, res) {
+    const result = await auditStore.releaseLeadLock({
+      workspaceId: req.params.id,
+      userId: req.user.id
+    });
+    return res.status(200).json(result);
+  })
+);
+
+app.post(
+  "/api/workspaces/:id/presence",
+  requireAuth(async function(req, res) {
+    const result = await auditStore.heartbeatWorkspacePresence({
+      workspaceId: req.params.id,
+      userId: req.user.id,
+      name: req.user.name,
+      email: req.user.email,
+      designation: req.user.designation,
+      color: req.body.color || req.user.color,
+      role: req.body.role || "reviewer"
+    });
+    return res.status(200).json(result);
+  })
+);
+
+app.get(
+  "/api/workspaces/:id/presence",
+  requireAuth(async function(req, res) {
+    const participants = await auditStore.listWorkspacePresence(req.params.id);
+    return res.status(200).json({ participants });
   })
 );
 
@@ -618,8 +791,62 @@ app.post(
 app.post(
   "/api/workspaces",
   asyncRoute(async function(req, res) {
-    const workspace = await auditStore.createWorkspace(req.body || {});
-    res.status(201).json({ workspace });
+    const requestUser = await readAuthUser(req);
+    const body = req.body || {};
+    const metadata = body.metadata || {};
+    const ownerUserId =
+      body.ownerUserId ||
+      body.owner_user_id ||
+      (requestUser && body.memberRole === "lead" ? requestUser.id : "");
+    const workspace = await auditStore.createWorkspace({
+      ...body,
+      ownerUserId
+    });
+    let member = null;
+    if (requestUser) {
+      member = await auditStore.addWorkspaceMember({
+        workspaceId: workspace.id,
+        userId: requestUser.id,
+        role: body.memberRole || (workspace.owner_user_id === requestUser.id ? "lead" : "reviewer"),
+        color: body.userColor || metadata.userColor || requestUser.color
+      });
+    }
+    res.status(201).json({ workspace, member });
+  })
+);
+
+app.post(
+  "/api/workspaces/:id/invites",
+  requireAuth(async function(req, res) {
+    const workspace = await auditStore.getWorkspace(req.params.id);
+    if (!workspace) return res.status(404).json({ error: "Workspace not found." });
+    if (workspace.owner_user_id && workspace.owner_user_id !== req.user.id) {
+      return res.status(403).json({ error: "Only the lead reviewer can share this workspace." });
+    }
+    const invite = await auditStore.inviteWorkspaceUser({
+      workspaceId: req.params.id,
+      email: req.body.email,
+      role: req.body.role || "reviewer",
+      invitedByUserId: req.user.id
+    });
+    return res.status(201).json({ invite });
+  })
+);
+
+app.post(
+  "/api/workspaces/:id/end",
+  requireAuth(async function(req, res) {
+    const workspace = await auditStore.getWorkspace(req.params.id);
+    if (!workspace) return res.status(404).json({ error: "Workspace not found." });
+    if (workspace.owner_user_id && workspace.owner_user_id !== req.user.id) {
+      return res.status(403).json({ error: "Only the lead reviewer can end this workspace." });
+    }
+    const ended = await auditStore.endWorkspace(req.params.id);
+    await auditStore.releaseLeadLock({
+      workspaceId: req.params.id,
+      userId: req.user.id
+    });
+    return res.status(200).json({ workspace: ended });
   })
 );
 
@@ -645,6 +872,22 @@ app.get(
   asyncRoute(async function(req, res) {
     const events = await auditStore.listAnnotationEvents(req.query.workspaceId || "");
     res.status(200).json({ events });
+  })
+);
+
+app.get(
+  "/api/annotations/recent",
+  asyncRoute(async function(req, res) {
+    const events = await auditStore.listRecentAnnotationEvents(req.query.workspaceId || "");
+    res.status(200).json({ events });
+  })
+);
+
+app.get(
+  "/api/annotations/:annotationId/timeline",
+  asyncRoute(async function(req, res) {
+    const events = await auditStore.annotationTimeline(req.query.workspaceId || "", req.params.annotationId);
+    res.status(200).json({ annotationId: req.params.annotationId, events });
   })
 );
 
@@ -690,7 +933,15 @@ app.post(
 
 app.use(function(err, req, res, next) {
   console.error("API error:", err.message);
-  res.status(500).json({ error: "Internal API error." });
+  const status = err.statusCode || 500;
+  const messages = {
+    invalid_email: "Enter a valid email address.",
+    weak_password: "Password must be at least 6 characters.",
+    email_already_registered: "This email is already registered.",
+    invalid_credentials: "Email or password is incorrect.",
+    workspace_and_email_required: "Workspace and email are required."
+  };
+  res.status(status).json({ error: messages[err.message] || (status >= 500 ? "Internal API error." : err.message) });
 });
 
 if (require.main === module) {

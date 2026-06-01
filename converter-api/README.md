@@ -49,14 +49,22 @@ CLOUDINARY_API_SECRET=
 CLOUDINARY_FOLDER=hexscrum-workspace
 DATABASE_URL=
 DATABASE_SSL=true
+AUTH_SECRET=
 AGORA_APP_ID=
 AGORA_APP_CERTIFICATE=
 AGORA_RTM_TOKEN_TTL_SECONDS=3600
+UPSTASH_REDIS_REST_URL=
+UPSTASH_REDIS_REST_TOKEN=
+UPSTASH_WORKSPACE_CACHE_TTL_SECONDS=86400
+UPSTASH_WORKSPACE_PRESENCE_TTL_SECONDS=45
+UPSTASH_WORKSPACE_LEAD_LOCK_TTL_SECONDS=90
 ```
 
 `CLOUDINARY_URL` may be used instead of the three individual Cloudinary fields.
 `LOCAL_UPLOAD_DIR` stores backend-served PDF copies used by the frontend whiteboard.
 `AGORA_APP_CERTIFICATE` is required when App Certificate/dynamic key is enabled in Agora.
+`AUTH_SECRET` signs login tokens and should be long, random, and backend-only.
+Upstash Redis REST settings are optional. They cache recent annotation events for faster timeline reads, track active participant presence, and enforce short-lived lead reviewer locks.
 
 ## Endpoints
 

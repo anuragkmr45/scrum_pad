@@ -1,24 +1,28 @@
 import PDFJSAnnotate from '../PDFJSAnnotate';
 import appendChild from '../render/appendChild';
 import {
-BORDER_COLOR,
-        disableUserSelect,
-        enableUserSelect,
-        findSVGAtPoint,
-        getMetadata,
-        getOffset,
-        scaleDown,
-        scaleUp
+  BORDER_COLOR,
+  disableUserSelect,
+  enableUserSelect,
+  findSVGAtPoint,
+  getMetadata,
+  scaleDown
 } from './utils';
 
 let _enabled = false;
-let _type;
 let overlay;
 let originY;
 let originX;
 let _ellipseColor;
 let _ellipseSize;
 
+let isEnablePointerEvents = false;
+function checkForPointerEvents() {
+  isEnablePointerEvents = true;
+  document.removeEventListener('pointermove', checkForPointerEvents);
+}
+
+document.addEventListener('pointermove', checkForPointerEvents);
 
 /**
  * Handle document.mousedown event
@@ -43,7 +47,13 @@ function handleDocumentMousedown(e) {
   overlay.style.borderRadius = '5%';
   svg.parentNode.appendChild(overlay);
 
-  document.addEventListener('mousemove', handleDocumentMousemove);
+  if (isEnablePointerEvents) {
+    document.addEventListener('pointermove', handleDocumentMousemove);
+    document.addEventListener('pointerup', handleDocumentMouseup);
+  } else {
+    document.addEventListener('mousemove', handleDocumentMousemove);
+    document.addEventListener('mouseup', handleDocumentMouseup);
+  }
   disableUserSelect();
 }
 
@@ -53,7 +63,13 @@ function handleDocumentMousedown(e) {
  * @param {Event} e The DOM event to handle
  */
 function handleDocumentMousemove(e) {
+  if (!overlay || !overlay.parentNode) {
+    return;
+  }
   let svg = overlay.parentNode.querySelector('svg.customAnnotationLayer');
+  if (!svg) {
+    return;
+  }
   let rect = svg.getBoundingClientRect();
 
   if (originX + (e.clientX - originX) < rect.right) {
@@ -72,10 +88,15 @@ function handleDocumentMousemove(e) {
  * @param {Event} e The DOM event to handle
  */
 function handleDocumentMouseup(e) {
-  let rects;
   if (overlay) {
     let svg = overlay.parentNode.querySelector('svg.customAnnotationLayer');
-    let rect = svg.getBoundingClientRect();
+    if (!svg) {
+      overlay.parentNode.removeChild(overlay);
+      overlay = null;
+      removeDragListeners();
+      enableUserSelect();
+      return;
+    }
     let rx = parseInt(overlay.style.width, 10) / 2;
     let ry = parseInt(overlay.style.height, 10) / 2;
     saveEllipse({
@@ -89,8 +110,18 @@ function handleDocumentMouseup(e) {
     overlay.parentNode.removeChild(overlay);
     overlay = null;
 
-    document.removeEventListener('mousemove', handleDocumentMousemove);
+    removeDragListeners();
     enableUserSelect();
+  }
+}
+
+function removeDragListeners() {
+  if (isEnablePointerEvents) {
+    document.removeEventListener('pointermove', handleDocumentMousemove);
+    document.removeEventListener('pointerup', handleDocumentMouseup);
+  } else {
+    document.removeEventListener('mousemove', handleDocumentMousemove);
+    document.removeEventListener('mouseup', handleDocumentMouseup);
   }
 }
 
@@ -107,7 +138,7 @@ function handleDocumentKeyup(e) {
     if (overlay && overlay.parentNode) {
       overlay.parentNode.removeChild(overlay);
       overlay = null;
-      document.removeEventListener('mousemove', handleDocumentMousemove);
+      removeDragListeners();
     }
   }
 }
@@ -121,15 +152,11 @@ function handleDocumentKeyup(e) {
  */
 function saveEllipse(ellipse, color, size) {
   let svg = findSVGAtPoint(ellipse.cX - ellipse.rX, ellipse.cY- ellipse.rY);
-  let node;
   let annotation;
 
   if (!svg) {
     return;
   }
-
-  let boundingRect = svg.getBoundingClientRect();
-
 
   // Initialize the annotation
   annotation = scaleDown(svg, ellipse);
@@ -173,8 +200,12 @@ export function enableEllipse() {
   }
 
   _enabled = true;
-  document.addEventListener('mouseup', handleDocumentMouseup);
-  document.addEventListener('mousedown', handleDocumentMousedown);
+  if (isEnablePointerEvents) {
+    document.addEventListener('pointerdown', handleDocumentMousedown);
+    document.body && document.body.classList.add('touch-action-disable');
+  } else {
+    document.addEventListener('mousedown', handleDocumentMousedown);
+  }
   document.addEventListener('keyup', handleDocumentKeyup);
 }
 
@@ -187,8 +218,12 @@ export function disableEllipse() {
   }
 
   _enabled = false;
-  document.removeEventListener('mouseup', handleDocumentMouseup);
-  document.removeEventListener('mousedown', handleDocumentMousedown);
+  if (isEnablePointerEvents) {
+    document.removeEventListener('pointerdown', handleDocumentMousedown);
+    document.body && document.body.classList.remove('touch-action-disable');
+  } else {
+    document.removeEventListener('mousedown', handleDocumentMousedown);
+  }
+  removeDragListeners();
   document.removeEventListener('keyup', handleDocumentKeyup);
 }
-

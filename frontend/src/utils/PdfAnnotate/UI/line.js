@@ -28,8 +28,7 @@ document.addEventListener('pointermove', checkForPointerEvents);
  * Handle document.mousedown event
  */
 function handleDocumentMousedown(e) {
-  let svg;
-  if (!(svg = findSVGAtPoint(e.clientX, e.clientY))) {
+  if (!findSVGAtPoint(e.clientX, e.clientY)) {
     return;
   }
   originY = e.clientY;
@@ -91,6 +90,9 @@ function handleDocumentMouseup(e) {
  */
 function handleDocumentMousemove(e) {
   let svg = findSVGAtPoint(e.clientX, e.clientY);
+  if (!svg) {
+    return;
+  }
 
   let rect = svg.getBoundingClientRect();
   let targetX = e.clientX;
@@ -202,4 +204,3 @@ export function disableLine() {
   }
   enableUserSelect();
 }
-

@@ -211,6 +211,17 @@ export const RootProvider: React.FC<any> = ({children}) => {
             roomStore.setFileData(fileData)
 
             break;
+            case "workspace-ended":
+              globalStore.showToast({
+                type: 'notice',
+                message: 'The lead reviewer ended this workspace.',
+              });
+              roomStore.exitAll()
+                .catch(console.warn)
+                .finally(() => {
+                  history.push('/');
+                });
+              break;
 
         default:
       }

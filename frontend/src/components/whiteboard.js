@@ -65,7 +65,7 @@ const trackAnnotationEvent = (action, documentId, annotation, annotationId, befo
       annotationId: annotationId || (annotation && (annotation.uuid || annotation.id)) || '',
       action,
       toolType: inferToolType(annotation),
-      userId: me.uid || profile.userId || '',
+      userId: profile.userId || me.uid || '',
       userName: me.account || profile.name || '',
       userDesignation: profile.designation || '',
       userColor: profile.color || '',
@@ -234,187 +234,198 @@ const Whiteboard = () => {
     });
   }, [arrayStoreAdapter]);
 
+  const getRemoteAnnotationPage = (annotationPayload) => {
+    if (Array.isArray(annotationPayload)) {
+      return annotationPayload.length ? Number(annotationPayload[0].page || annotationPayload[0].pageNumber || 1) : 1;
+    }
+    if (!annotationPayload) return 1;
+    return Number(annotationPayload.page || annotationPayload.pageNumber || 1);
+  };
+
+  const findAnnotationLayer = (documentId, pageNumber) => {
+    return document.querySelector(
+      `[data-pdf-annotate-document="${documentId}"][data-pdf-annotate-page="${pageNumber}"]`
+    );
+  };
+
+  const clearAnnotationLayers = (documentId) => {
+    let annotationLayers = document.querySelectorAll(
+      `[data-pdf-annotate-document="${documentId}"]`
+    );
+    annotationLayers.forEach(function (item) {
+      item.innerHTML = "";
+    });
+  };
+
+  const renderRemoteAnnotations = (documentId, pageNumber, attempt = 0) => {
+    const svg = findAnnotationLayer(documentId, pageNumber);
+    if (!svg) {
+      if (attempt < 8) {
+        window.setTimeout(() => renderRemoteAnnotations(documentId, pageNumber, attempt + 1), 120);
+      }
+      return Promise.resolve(false);
+    }
+
+    return arrayStoreAdapter
+      .getAnnotations(documentId, pageNumber)
+      .then((renderData) => {
+        const viewport = JSON.parse(svg.getAttribute("data-pdf-annotate-viewport"));
+        return PDFJSAnnotate.render(svg, viewport, renderData);
+      })
+      .catch(() => false);
+  };
+
+  const renderRemoteAnnotationPages = (documentId, annotations) => {
+    const pages = {};
+    if (Array.isArray(annotations)) {
+      annotations.forEach((annotation) => {
+        pages[getRemoteAnnotationPage(annotation)] = true;
+      });
+    }
+
+    if (!Object.keys(pages).length) {
+      const layers = document.querySelectorAll(`[data-pdf-annotate-document="${documentId}"]`);
+      layers.forEach((layer) => {
+        const page = layer.getAttribute("data-pdf-annotate-page");
+        if (page) pages[page] = true;
+      });
+    }
+
+    return Promise.all(
+      Object.keys(pages).map((page) => renderRemoteAnnotations(documentId, Number(page)))
+    );
+  };
+
+  const writeRemoteAnnotationsToLocalStore = (documentId, annotations) => {
+    const storeAdapter = PDFJSAnnotate.getStoreAdapter();
+    if (storeAdapter && storeAdapter.setAnnotations) {
+      return storeAdapter.setAnnotations(documentId, annotations);
+    }
+    return Promise.resolve(true);
+  };
+
+  const replaceRemoteAnnotations = (documentId, annotations) => {
+    const nextAnnotations = Array.isArray(annotations) ? annotations : [];
+    return PDFJSAnnotate
+      .getStoreAdapter()
+      .resetAnnotation(documentId, true)
+      .then(() => arrayStoreAdapter.resetAnnotation(documentId))
+      .then(() => writeRemoteAnnotationsToLocalStore(documentId, nextAnnotations))
+      .then(() => arrayStoreAdapter.setAnnotations(documentId, nextAnnotations))
+      .then(() => {
+        clearAnnotationLayers(documentId);
+        return renderRemoteAnnotationPages(documentId, nextAnnotations);
+      })
+      .catch(() => false);
+  };
+
   useEffect(() => {
 
     try {
-    if (
-      roomStore._state.annotatePdf.annotations 
-      // roomStore._state.me.role != "teacher"
-    ) {
-      let annotate = roomStore._state.annotatePdf;
+      const annotate = roomStore._state.annotatePdf;
+      if (!annotate || !annotate.annotations) {
+        return;
+      }
       if (annotate.senderUid && `${annotate.senderUid}` === `${roomStore._state.me.uid}`) {
         return;
       }
-      let annotations = annotate.annotations;
-      let pageNumber = annotate.annotations.annotations.page ? annotate.annotations.annotations.page : 1
-      let svg;
-      if (annotations.documentId != 1)
-        svg = document.querySelector(
-          `[data-pdf-annotate-document="${annotations.documentId}"][data-pdf-annotate-page="${pageNumber}"]`
-        );
+      const remoteMessage = annotate.annotations;
+      const documentId = remoteMessage.documentId;
+      const annotationPayload = remoteMessage.annotations;
+      const pageNumber = getRemoteAnnotationPage(annotationPayload);
+      const status = annotate.status;
 
-        const status = roomStore._state.annotatePdf.status;
-
-        switch(status) {
-          case 'annotation-added' : {
-            if(roomStore._state.annotatePdf.annotationId !== roomStore._state.me.uid) {
-              arrayStoreAdapter
-                .addAnnotation(annotations.documentId, annotations.annotations)
-                .then(() => {
-                  arrayStoreAdapter
-                    .getAnnotations(annotations.documentId, pageNumber)
-                    .then((annotations) => {
-                      return Promise.all([
-                        PDFJSAnnotate.render(
-                          svg,
-                          JSON.parse(svg.getAttribute("data-pdf-annotate-viewport")),
-                          annotations
-                        ),
-                      ]).then(() => {
-                      });
-                    });
-                });
-            }
-            break;
+      switch(status) {
+        case 'annotation-added' : {
+          if(annotate.annotationId !== roomStore._state.me.uid && annotationPayload) {
+            writeRemoteAnnotationsToLocalStore(documentId, [annotationPayload])
+              .then(() => arrayStoreAdapter.setAnnotations(documentId, [annotationPayload]))
+              .then(() => renderRemoteAnnotations(documentId, pageNumber))
+              .catch(() => {});
           }
-          case 'annotation-updated': {
-            arrayStoreAdapter
+            break;
+        }
+        case 'annotation-updated': {
+          if (annotationPayload) {
+            writeRemoteAnnotationsToLocalStore(documentId, [annotationPayload])
+              .then(() => arrayStoreAdapter
             .editAnnotation(
-              annotations.documentId,
-              roomStore._state.annotatePdf.annotationId,
-              annotations.annotations
-            )
-            .then(() => {
-              arrayStoreAdapter
-                .getAnnotations(annotations.documentId, pageNumber)
-                .then((annotations) => {
-                  return Promise.all([
-                    PDFJSAnnotate.render(
-                      svg,
-                      JSON.parse(svg.getAttribute("data-pdf-annotate-viewport")),
-                      annotations
-                    ),
-                  ]).then(() => {
-                    //  PDFJSAnnotate.UI.enableRect('area');
-                  }).catch(err => {
-                  });
-                });
-            });
-            break;
+                documentId,
+                annotate.annotationId,
+                annotationPayload
+              ))
+              .then(() => renderRemoteAnnotations(documentId, pageNumber))
+              .catch(() => {});
           }
-          case 'annotation-removed': {
-            if(roomStore._state.annotatePdf.annotationId !== roomStore._state.me.uid) {
-              PDFJSAnnotate.getStoreAdapter().resetAnnotation(
-                annotations.documentId,
-                true
-              );
-              arrayStoreAdapter.resetAnnotation(annotations.documentId).then(() => {
-                let annotationLayers = document.querySelectorAll(
-                  `[data-pdf-annotate-document="${annotations.documentId}"]`
-                );
-                annotationLayers.forEach(function (item) {
-                  item.innerHTML = "";
-                });
-              }).then(() => {
-                annotations.annotations.forEach(element => {
-                  arrayStoreAdapter
-                .addAnnotation(annotations.documentId, element)
-                .then(() => {
-                  arrayStoreAdapter
-                    .getAnnotations(annotations.documentId, element.page)
-                    .then((annotations) => {
-                      svg = document.querySelector(
-                        `[data-pdf-annotate-document="${annotations.documentId}"][data-pdf-annotate-page="${element.page}"]`)
-                      return Promise.all([
-                        PDFJSAnnotate.render(
-                          svg,
-                          JSON.parse(svg.getAttribute("data-pdf-annotate-viewport")),
-                          annotations
-                        ),
-                      ]).then(() => {
-                        //  PDFJSAnnotate.UI.enableRect('area');
-                      }).catch(err => {
-                      });
-                    });
-                });
-                });
-              });
-            }
             break;
+        }
+        case 'annotation-removed': {
+          if(annotate.annotationId !== roomStore._state.me.uid) {
+            replaceRemoteAnnotations(documentId, annotationPayload);
           }
-          case 'annotation-reset': {
-            PDFJSAnnotate.getStoreAdapter().resetAnnotation(
-              annotations.documentId,
-              true
-            );
-            arrayStoreAdapter.resetAnnotation(annotations.documentId).then(() => {
-              let annotationLayers = document.querySelectorAll(
-                `[data-pdf-annotate-document="${annotations.documentId}"]`
-              );
-              annotationLayers.forEach(function (item) {
-                item.innerHTML = "";
-              });
-            });
             break;
-          } 
-          case 'add-page': {
+        }
+        case 'annotation-reset': {
+          replaceRemoteAnnotations(documentId, []);
+            break;
+        } 
+        case 'add-page': {
             fileState.fileDispatch({
               type: "remote-add-page",
-              fileId: annotations.documentId,
+            fileId: documentId,
             });
             break;
-          }  
-          case 'add-uploaded-page': {
+        }  
+        case 'add-uploaded-page': {
             if(!Boolean(roomStore.uploadBy)) {
               fileState.fileDispatch({
                 type: "remote-add-page",
-                fileId: annotations.documentId,
+              fileId: documentId,
               });
             }
             break;
-          } 
-          case 'remove-page': {
+        } 
+        case 'remove-page': {
             arrayStoreAdapter.resetAnnotation(
-              roomStore._state.annotatePdf.annotationId
+            annotate.annotationId
             );
             let annotationLayers = document.querySelectorAll(
-              `[data-pdf-annotate-document="${roomStore._state.annotatePdf.annotationId}"]`
+            `[data-pdf-annotate-document="${annotate.annotationId}"]`
             );
             annotationLayers.forEach(function (item) {
               item.innerHTML = "";
             });
             fileState.fileDispatch({
               type: "remote-remove-page",
-              fileId: annotations.documentId,
+            fileId: documentId,
             });
             break;
-          }
-          case 'next-page': {
+        }
+        case 'next-page': {
             toggleNext(undefined, undefined, undefined, false);
             break;
-          }
-          case 'prev-page': {
+        }
+        case 'prev-page': {
             togglePrev(undefined, undefined, undefined, false);
             break;
-          }
-          case 'toggleFirstLast': {
-            toggleFirstLast(roomStore._state.annotatePdf.annotationId, undefined, undefined, undefined, false);
+        }
+        case 'toggleFirstLast': {
+          toggleFirstLast(annotate.annotationId, undefined, undefined, undefined, false);
             break;
-          }        
-          case 'sync-scroll': {
+        }        
+        case 'sync-scroll': {
             const board = document.querySelector(".media-board");
             if (board) {
               window.__hexscrumApplyingRemoteScroll = true;
-              board.scrollTop = roomStore._state.annotatePdf.annotationId;
+            board.scrollTop = annotate.annotationId;
               window.setTimeout(() => {
                 window.__hexscrumApplyingRemoteScroll = false;
               }, 80);
             }
             break
-          }
-          default:
-        }  
-    }
+        }
+        default:
+      }
     } catch (err) {
       // silent screen sharing error
     }

@@ -73,11 +73,17 @@ Backend private env:
 - `CLOUDINARY_FOLDER=hexscrum-workspace`
 - `DATABASE_URL`: Neon Postgres connection string.
 - `DATABASE_SSL=true`
+- `AUTH_SECRET`: long random secret for login/session tokens.
 - `AGORA_APP_ID`: same Agora project as `REACT_APP_AGORA_APP_ID`.
 - `AGORA_APP_CERTIFICATE`: required when Agora App Certificate/dynamic key is enabled.
 - `AGORA_RTM_TOKEN_TTL_SECONDS=3600`
 - `FRONTEND_ORIGIN=https://YOUR-VERCEL-APP.vercel.app`
 - `CORS_ORIGINS=https://YOUR-VERCEL-APP.vercel.app`
+- `UPSTASH_REDIS_REST_URL`: optional Upstash Redis REST URL for recent annotation cache.
+- `UPSTASH_REDIS_REST_TOKEN`: optional Upstash Redis REST token.
+- `UPSTASH_WORKSPACE_CACHE_TTL_SECONDS=86400`: optional cache TTL.
+- `UPSTASH_WORKSPACE_PRESENCE_TTL_SECONDS=45`: optional active participant heartbeat TTL.
+- `UPSTASH_WORKSPACE_LEAD_LOCK_TTL_SECONDS=90`: optional lead reviewer lock TTL.
 
 Do not put Cloudinary secrets or `DATABASE_URL` in the frontend.
 

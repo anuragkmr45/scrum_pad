@@ -76,6 +76,12 @@ type ExportCanvasOption = {
   label: string
   pageCount: number
 }
+
+type ExportParticipant = {
+  uid: string
+  name: string
+  role: string
+}
 export const toggleNext = (
   setCanvasNumber?: any,
   pdfFiles: any = [],
@@ -276,6 +282,7 @@ export default function Control({
   const [isRecording, setRecording] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportCanvases, setExportCanvases] = useState<ExportCanvasOption[]>([]);
+  const [exportParticipants, setExportParticipants] = useState<ExportParticipant[]>([]);
   const [selectedExportCanvasIds, setSelectedExportCanvasIds] = useState<string[]>([]);
   const [exportOrientation, setExportOrientation] = useState<ExportOrientation>('auto');
   const [exportRotation, setExportRotation] = useState<number>(0);
@@ -286,7 +293,6 @@ export default function Control({
   // to get current canvas number
   const [currentCanvasNumber, setCanvasNumber] = useState(1);
   const isLiveReview = useMemo(() => Boolean(location.pathname.match(/one-to-one/)), [location.pathname]);
-  const canManageCanvas = useMemo(() => role === 'teacher' || isLiveReview, [isLiveReview, role]);
   const showCreate: boolean = useMemo(() => {
 
     if (role === 'teacher' && (location.pathname.match(/big-class/) || location.pathname.match(/small-class/))) {
@@ -296,6 +302,9 @@ export default function Control({
   }, [location.pathname, role]);
 
   const fileState = useContext(fileContext);
+  const canAnnotate = fileState.canAnnotate !== false;
+  const canManageWorkspace = Boolean(fileState.canManageWorkspace || role === 'teacher');
+  const canManageCanvas = canManageWorkspace;
 
   useEffect(() => {
     const removeListener = addHistoryStateListener((event: any) => {
@@ -373,7 +382,27 @@ export default function Control({
 
   const openExportDialog = () => {
     const canvases = getExportCanvasOptions();
+    const me = roomStore._state.me || {};
+    const participantMap: { [key: string]: ExportParticipant } = {};
+    if (me.uid || me.account || role) {
+      participantMap[String(me.uid || 'me')] = {
+        uid: String(me.uid || 'me'),
+        name: me.account || 'Current user',
+        role: me.role === 'teacher' || role === 'teacher' ? 'Lead reviewer' : 'Reviewer',
+      };
+    }
+    roomStore._state.users
+      .toArray()
+      .forEach((user: any, index: number) => {
+        const uid = String(user.uid || `participant-${index}`);
+        participantMap[uid] = {
+          uid,
+          name: user.account || (uid === String(me.uid) ? me.account : '') || 'Unknown',
+          role: user.role === 'teacher' ? 'Lead reviewer' : 'Reviewer',
+        };
+      });
     setExportCanvases(canvases);
+    setExportParticipants(Object.values(participantMap));
     setSelectedExportCanvasIds(canvases.map((canvas) => canvas.id));
     setExportOrientation('auto');
     setExportRotation(0);
@@ -621,9 +650,9 @@ export default function Control({
               onClick={onClick} />
             : null}
         </div>
-        {canManageCanvas || showTool ?
+        {canAnnotate || canManageCanvas || showTool ?
           <div className="controls">
-            {canManageCanvas ?
+            {canAnnotate ?
               <>
                 <div className={`control-button history-control ${historyState.canUndo ? '' : 'disabled'}`}>
                   <UndoIcon onClick={() => historyState.canUndo && syncAnnotationSnapshot('undo')} />
@@ -636,7 +665,10 @@ export default function Control({
                 </div>
 
                 <div className="menu-split" style={{ marginLeft: '7px', marginRight: '7px' }}></div>
-
+              </> : null
+            }
+            {canManageCanvas ?
+              <>
                 <div className="control-button">
                   <FirstPageIcon onClick={() => toggleFirstLast('first', setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages)}>
                   </FirstPageIcon>
@@ -822,6 +854,39 @@ export default function Control({
                     {rotation}°
                   </button>
                 ))}
+              </div>
+            </div>
+
+            <div className="export-modal-section export-preview-section">
+              <strong>Preview</strong>
+              <div className="export-preview-card">
+                <div>
+                  <span>Canvases</span>
+                  <strong>{selectedExportCanvasIds.length}/{exportCanvases.length}</strong>
+                </div>
+                <div>
+                  <span>Direction</span>
+                  <strong>{exportOrientation}</strong>
+                </div>
+                <div>
+                  <span>Rotation</span>
+                  <strong>{exportRotation}°</strong>
+                </div>
+              </div>
+              <div className="export-participants">
+                <span>Participants</span>
+                {exportParticipants.length ?
+                  exportParticipants.map((participant) => (
+                    <div key={participant.uid || participant.name}>
+                      <strong>{participant.name}</strong>
+                      <small>{participant.role}</small>
+                    </div>
+                  )) :
+                  <div>
+                    <strong>No active participants found</strong>
+                    <small>Only the lead reviewer is currently visible.</small>
+                  </div>
+                }
               </div>
             </div>
 

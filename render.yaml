@@ -19,6 +19,8 @@ services:
         value: 25
       - key: OFFICE_CONVERTER
         value: libreoffice
+      - key: AUTH_SECRET
+        sync: false
       - key: FRONTEND_ORIGIN
         sync: false
       - key: CORS_ORIGINS
@@ -39,3 +41,13 @@ services:
         sync: false
       - key: AGORA_RTM_TOKEN_TTL_SECONDS
         value: "3600"
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: UPSTASH_WORKSPACE_CACHE_TTL_SECONDS
+        value: "86400"
+      - key: UPSTASH_WORKSPACE_PRESENCE_TTL_SECONDS
+        value: "45"
+      - key: UPSTASH_WORKSPACE_LEAD_LOCK_TTL_SECONDS
+        value: "90"

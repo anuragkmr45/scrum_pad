@@ -27,6 +27,7 @@ const Toolelements = () => {
   let [color, changeColor] = useState('#EB5E28');
   let [colorPicker, setColorPicker] = useState(false);
   let [sizePicker, setSizePicker] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState(null);
 
   const location = useLocation();
 
@@ -226,9 +227,11 @@ const Toolelements = () => {
     try {
       elem.parentNode.removeChild(elem);
     } catch (e) { }
+    setUploadStatus(null);
   };
 
   const fileState = useContext(fileContext);
+  const canManageWorkspace = Boolean(fileState.canManageWorkspace || roomStore._state.me.role === 'teacher');
   const converterBaseUrl = (process.env.REACT_APP_LIBRE_BACKEND_URL || '').replace(/\/$/, '');
   const converterUploadUrl = converterBaseUrl
     ? (converterBaseUrl.match(/\/upload$/) ? converterBaseUrl : `${converterBaseUrl}/upload`)
@@ -246,12 +249,22 @@ const Toolelements = () => {
   },[fileState]);
 
   const handleUpload = () => {
+    if (!canManageWorkspace) {
+      alert("Only the lead reviewer can upload documents.");
+      return;
+    }
     try {
       showLoader();
       let files = document.getElementById("fileUpload").files;
       if (files) {
         let file = files[0];
         if (file) {
+          const ext = (file.name.split('.').pop() || 'file').toUpperCase();
+          setUploadStatus({
+            fileName: file.name,
+            fileType: ext,
+            message: 'Uploading and converting document...'
+          });
           let size = file.size / 1024 / 1024;
           if (checkFileSize(size)) {
             uploadViaConverter(file);
@@ -288,7 +301,7 @@ const Toolelements = () => {
     const formData = new FormData();
     formData.append("sampleFile", file);
     formData.append("workspaceId", workspaceId);
-    formData.append("userId", roomStore._state.me.uid || profile.userId || '');
+    formData.append("userId", profile.userId || roomStore._state.me.uid || '');
     formData.append("userName", roomStore._state.me.account || profile.name || '');
     formData.append("userDesignation", profile.designation || '');
     formData.append("userColor", profile.color || '');
@@ -303,6 +316,11 @@ const Toolelements = () => {
           hideLoader();
           return;
         }
+        setUploadStatus({
+          fileName: file.name,
+          fileType: 'PDF',
+          message: 'Document ready. Syncing to workspace...'
+        });
         fileState.fileDispatch({ type: "upload-file", fileId: data.secure_url || data.url });
         hideLoader();
       })
@@ -316,6 +334,10 @@ const Toolelements = () => {
   const inputFileRef = useRef(null);
 
   const handleFileUpload = () => {
+    if (!canManageWorkspace) {
+      alert("Only the lead reviewer can upload documents.");
+      return;
+    }
     /*Collecting node-element and performing click*/
     inputFileRef.current.click();
   }
@@ -443,13 +465,14 @@ const Toolelements = () => {
               />
               <span className="tooltiptext">Eraser</span>
           </div>
+          {canManageWorkspace ?
           <div onClick={handleClearClick} className="menu-mat-icons">
               <DeleteIcon
                data-annotation-type="clear"
                className= { tooltype === 'clear' ? 'icon items active' : 'icon items'}
               />
               <span className="tooltiptext">Clear All</span>
-          </div>
+          </div> : null}
           {
             isPdf ?
             <div className='menu-mat-icons'>
@@ -471,6 +494,7 @@ const Toolelements = () => {
            <span className="tooltiptext">Highlight Text</span>
           </>
           }
+          {canManageWorkspace ?
           <div className="menu-mat-icons">
               <PublishIcon onClick = {handleFileUpload} className="icon items upload"
                />
@@ -483,7 +507,7 @@ const Toolelements = () => {
             accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,.odt,.odp,.ods,.png,.jpg,.jpeg"
             style={{display: 'none'}}
             />
-          </div>
+          </div> : null}
           {
             showTool ?
             <>
@@ -494,6 +518,16 @@ const Toolelements = () => {
           }
         </div>
       </div>
+      {uploadStatus ?
+        <div className="upload-progress-overlay" role="status" aria-live="polite">
+          <div className="upload-progress-card">
+            <div className="upload-file-icon">{uploadStatus.fileType}</div>
+            <div>
+              <strong>{uploadStatus.fileName}</strong>
+              <span>{uploadStatus.message}</span>
+            </div>
+          </div>
+        </div> : null}
     </>
   );
 };
