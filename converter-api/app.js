@@ -2,6 +2,7 @@ const express = require("express");
 const fileUpload = require("express-fileupload");
 const path = require("path");
 const fs = require("fs");
+const { pathToFileURL } = require("url");
 const { spawn, spawnSync } = require("child_process");
 const randomstring = require("randomstring");
 const PDFDocument = require("pdfkit");
@@ -18,6 +19,7 @@ const cloudinaryFolder = process.env.CLOUDINARY_FOLDER || "hexscrum-workspace";
 const configuredMaxUploadMb = Number(process.env.MAX_UPLOAD_MB || 25);
 const maxUploadMb = Number.isFinite(configuredMaxUploadMb) && configuredMaxUploadMb > 0 ? configuredMaxUploadMb : 25;
 const maxUploadBytes = maxUploadMb * 1024 * 1024;
+const officeConverter = (process.env.OFFICE_CONVERTER || "libreoffice").toLowerCase();
 const uploadDir = path.resolve("./test");
 const publicUploadDir = path.resolve(process.env.LOCAL_UPLOAD_DIR || "./uploaded-files");
 const agoraAppId = process.env.AGORA_APP_ID || "";
@@ -247,9 +249,19 @@ function convertWithUnoconv(inputPath, outputPath) {
   return unoconv.convert(inputPath, outputPath);
 }
 
-function runCommand(command, args, timeoutMs = 120000) {
+function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const timeoutMs = options.timeoutMs || 180000;
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        HOME: process.env.LIBREOFFICE_HOME || "/tmp",
+        TMPDIR: process.env.TMPDIR || "/tmp",
+        ...(options.env || {})
+      }
+    });
+    let stdout = "";
     let stderr = "";
     let settled = false;
     const timer = setTimeout(() => {
@@ -259,6 +271,9 @@ function runCommand(command, args, timeoutMs = 120000) {
       reject(new Error("conversion_timeout"));
     }, timeoutMs);
 
+    child.stdout.on("data", chunk => {
+      stdout += chunk.toString();
+    });
     child.stderr.on("data", chunk => {
       stderr += chunk.toString();
     });
@@ -273,7 +288,7 @@ function runCommand(command, args, timeoutMs = 120000) {
       settled = true;
       clearTimeout(timer);
       if (code === 0) return resolve();
-      const error = new Error(stderr.trim() || `${command} exited with code ${code}`);
+      const error = new Error(stderr.trim() || stdout.trim() || `${command} exited with code ${code}`);
       error.code = code;
       return reject(error);
     });
@@ -288,16 +303,27 @@ async function convertWithLibreOffice(inputPath, outputPath) {
 
   const outputDir = path.dirname(outputPath);
   const generatedPath = path.join(outputDir, `${path.basename(inputPath, path.extname(inputPath))}.pdf`);
-  await runCommand(command, [
-    "--headless",
-    "--nologo",
-    "--nofirststartwizard",
-    "--convert-to",
-    "pdf",
-    "--outdir",
-    outputDir,
-    inputPath
-  ]);
+  const profileDir = path.join(uploadDir, `lo-profile-${path.basename(outputPath, ".pdf")}`);
+  await fs.promises.mkdir(profileDir, { recursive: true });
+
+  try {
+    await runCommand(command, [
+      `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
+      "--headless",
+      "--nologo",
+      "--nodefault",
+      "--nofirststartwizard",
+      "--nolockcheck",
+      "--norestore",
+      "--convert-to",
+      "pdf",
+      "--outdir",
+      outputDir,
+      inputPath
+    ]);
+  } finally {
+    fs.promises.rm(profileDir, { recursive: true, force: true }).catch(() => {});
+  }
 
   if (fs.existsSync(outputPath)) return;
   if (fs.existsSync(generatedPath)) {
@@ -309,12 +335,13 @@ async function convertWithLibreOffice(inputPath, outputPath) {
 }
 
 async function convertOfficeToPdf(inputPath, outputPath) {
-  if (commandExists("unoconv")) {
+  const hasLibreOffice = commandExists("libreoffice") || commandExists("soffice");
+  if (officeConverter === "unoconv" && commandExists("unoconv")) {
     try {
       await convertWithUnoconv(inputPath, outputPath);
       return;
     } catch (err) {
-      if (!commandExists("libreoffice") && !commandExists("soffice")) {
+      if (!hasLibreOffice) {
         throw err;
       }
       console.warn("unoconv failed; falling back to LibreOffice:", err.message);

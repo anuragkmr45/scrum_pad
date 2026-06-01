@@ -17,6 +17,8 @@ services:
         value: hexscrum-workspace
       - key: MAX_UPLOAD_MB
         value: 25
+      - key: OFFICE_CONVERTER
+        value: libreoffice
       - key: FRONTEND_ORIGIN
         sync: false
       - key: CORS_ORIGINS
