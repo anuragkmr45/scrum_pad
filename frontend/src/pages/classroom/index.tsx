@@ -67,6 +67,7 @@ export function RoomPage({ children }: any) {
       rtmToken,
       linkId: linkId,
       uid,
+      authUserId: me.authUserId,
       role: me.role,
       account: me.account,
       boardId: me.boardId,

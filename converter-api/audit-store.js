@@ -1022,6 +1022,76 @@ async function listWorkspacesForUser(userId) {
   };
 }
 
+async function listWorkspaceMembers(workspaceId) {
+  if (!workspaceId) return [];
+  if (!pool) {
+    return memory.workspace_members
+      .filter(member => member.workspace_id === workspaceId)
+      .map(member => {
+        const user = memory.users.find(item => item.id === member.user_id) || {};
+        return {
+          ...member,
+          user_name: user.name || "",
+          user_email: user.email || "",
+          user_designation: user.designation || ""
+        };
+      })
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  }
+
+  const result = await query(
+    `SELECT
+       wm.*,
+       u.name AS user_name,
+       u.email AS user_email,
+       u.designation AS user_designation
+     FROM workspace_members wm
+     LEFT JOIN users u ON u.id = wm.user_id
+     WHERE wm.workspace_id = $1
+     ORDER BY wm.created_at ASC`,
+    [workspaceId]
+  );
+  return result.rows;
+}
+
+async function updateWorkspaceMemberStatus(body) {
+  const workspaceId = body.workspaceId || body.workspace_id || "";
+  const userId = body.userId || body.user_id || "";
+  const status = String(body.status || "").trim().toLowerCase();
+  const allowedStatuses = new Set(["active", "kicked", "blocked", "ended"]);
+  if (!workspaceId || !userId || !allowedStatuses.has(status)) {
+    const err = new Error("invalid_member_status");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const workspace = await getWorkspace(workspaceId);
+  if (workspace && workspace.owner_user_id === userId && status !== "active") {
+    const err = new Error("lead_reviewer_cannot_be_removed");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!pool) {
+    const member = memory.workspace_members.find(
+      item => item.workspace_id === workspaceId && item.user_id === userId
+    );
+    if (!member) return null;
+    member.status = status;
+    member.updated_at = nowIso();
+    return member;
+  }
+
+  const result = await query(
+    `UPDATE workspace_members
+     SET status = $3
+     WHERE workspace_id = $1 AND user_id = $2
+     RETURNING *`,
+    [workspaceId, userId, status]
+  );
+  return result.rows[0] || null;
+}
+
 async function inviteWorkspaceUser(body) {
   const workspaceId = body.workspaceId || body.workspace_id || "";
   const email = normalizeEmail(body.email || body.invitedEmail || body.invited_email);
@@ -1384,6 +1454,8 @@ module.exports = {
   getWorkspace,
   listWorkspacesForUser,
   addWorkspaceMember,
+  listWorkspaceMembers,
+  updateWorkspaceMemberStatus,
   inviteWorkspaceUser,
   endWorkspace,
   acquireLeadLock,

@@ -222,6 +222,24 @@ export const RootProvider: React.FC<any> = ({children}) => {
                   history.push('/');
                 });
               break;
+            case "participant-status":
+              if (
+                String(msg.targetUid || '') === String(roomStore.state.me.uid || '') ||
+                String(msg.targetAuthUserId || '') === String(roomStore.state.me.authUserId || '')
+              ) {
+                globalStore.showToast({
+                  type: 'notice',
+                  message: msg.message || 'Your workspace access was updated by the lead reviewer.',
+                });
+                if (msg.status === 'kicked' || msg.status === 'blocked') {
+                  roomStore.exitAll()
+                    .catch(console.warn)
+                    .finally(() => {
+                      history.push('/');
+                    });
+                }
+              }
+              break;
 
         default:
       }

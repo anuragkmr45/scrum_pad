@@ -50,6 +50,7 @@ export type ChannelAttrs = {
   uid: string
   account: string
   role: string
+  auth_user_id: string
   class_state?: number
   whiteboard_uid: string
   link_uid: number
@@ -58,6 +59,7 @@ export type ChannelAttrs = {
 };
 export interface AgoraUser {
   uid: string
+  authUserId: string
   account: string
   role: string
   boardId: string
@@ -168,6 +170,7 @@ export class RoomStore {
     me: {
       account: "",
       uid: "",
+      authUserId: "",
       role: "",
       linkId: 0,
       boardId: '',
@@ -619,6 +622,7 @@ export class RoomStore {
   private exactChannelAttrsBy(me: AgoraUser, course: ClassState): ChannelAttrs {
     const newChannelAttrs: ChannelAttrs = {
       uid: me.uid,
+      auth_user_id: me.authUserId,
       account: `${me.account}`,
       role: `${me.role}`,
       whiteboard_uid: me.boardId,
@@ -687,6 +691,7 @@ export class RoomStore {
 
     const AgoraUserKeys: string[] = [
       'uid',
+      'auth_user_id',
       'account',
       'role',
       'whiteboard_uid',
@@ -754,6 +759,7 @@ export class RoomStore {
     const users = accounts.reduce((acc: Map<string, AgoraUser>, it: any) => {
       return acc.set(it.uid, {
         role: it.role,
+        authUserId: it.auth_user_id,
         account: it.account,
         uid: it.uid,
         boardId: it.whiteboard_uid,

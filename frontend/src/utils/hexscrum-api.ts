@@ -215,6 +215,17 @@ export function inviteWorkspaceUser(workspaceId: string, payload: any) {
   });
 }
 
+export function listWorkspaceMembers(workspaceId: string) {
+  return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/members`);
+}
+
+export function updateWorkspaceMemberStatus(workspaceId: string, userId: string, status: string) {
+  return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
 export function endWorkspace(workspaceId: string) {
   return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/end`, {
     method: 'POST',

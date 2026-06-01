@@ -12,6 +12,8 @@ import NoteAddIcon from '@material-ui/icons/NoteAdd';
 import DeleteIcon from '@material-ui/icons/Delete';
 import FormatColorTextIcon from '@material-ui/icons/FormatColorText';
 import PublishIcon from '@material-ui/icons/Publish';
+import KeyboardArrowLeftIcon from '@material-ui/icons/KeyboardArrowLeft';
+import KeyboardArrowRightIcon from '@material-ui/icons/KeyboardArrowRight';
 import UI from "../../utils/PdfAnnotate/UI";
 import { SketchPicker } from 'react-color';
 import LineWeightIcon from '@material-ui/icons/LineWeight';
@@ -28,6 +30,8 @@ const Toolelements = () => {
   let [colorPicker, setColorPicker] = useState(false);
   let [sizePicker, setSizePicker] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null);
+  const [toolbarCollapsed, setToolbarCollapsed] = useState(false);
+  const [clearModalOpen, setClearModalOpen] = useState(false);
 
   const location = useLocation();
 
@@ -178,24 +182,23 @@ const Toolelements = () => {
   }
 
 
-  const handleClearClick = (e) => {
-    if (
-      window.confirm(
-        "Are you sure you want to clear all the annotations? The cleared annotations will not be recovered."
-      )
-    ) {
-      let annotationLayers = document.querySelectorAll(
-        "div.pdfViewer.active svg.customAnnotationLayer"
-      );
-      annotationLayers.forEach(function (item) {
-        item.innerHTML = "";
-      });
-      PDFJSAnnotate.getStoreAdapter().resetAnnotation(
-        document
-          .querySelector("div.pdfViewer.active svg.customAnnotationLayer")
-          .getAttribute("data-pdf-annotate-document")
-      );
-    }
+  const clearCurrentCanvasAnnotations = () => {
+    let annotationLayers = document.querySelectorAll(
+      "div.pdfViewer.active svg.customAnnotationLayer"
+    );
+    annotationLayers.forEach(function (item) {
+      item.innerHTML = "";
+    });
+    PDFJSAnnotate.getStoreAdapter().resetAnnotation(
+      document
+        .querySelector("div.pdfViewer.active svg.customAnnotationLayer")
+        .getAttribute("data-pdf-annotate-document")
+    );
+    setClearModalOpen(false);
+  };
+
+  const handleClearClick = () => {
+    setClearModalOpen(true);
   };
   const displayColorPicker = () => {
 
@@ -352,8 +355,16 @@ const Toolelements = () => {
 
   return (
     <>
-      <div className="menu">
-        <div className="nav annotation-toolbar">
+      <div className={`menu ${toolbarCollapsed ? 'toolbar-collapsed' : ''}`}>
+        <button
+          type="button"
+          className="toolbar-collapse-toggle"
+          onClick={() => setToolbarCollapsed(!toolbarCollapsed)}
+          aria-label={toolbarCollapsed ? 'Open side toolbar' : 'Close side toolbar'}
+        >
+          {toolbarCollapsed ? <KeyboardArrowRightIcon /> : <KeyboardArrowLeftIcon />}
+        </button>
+        {!toolbarCollapsed ? <div className="nav annotation-toolbar">
         <div className="menu-mat-icons">
             <NearMeIcon
             data-annotation-type="cursor"
@@ -516,8 +527,20 @@ const Toolelements = () => {
             </>
             : null
           }
-        </div>
+        </div> : null}
       </div>
+      {clearModalOpen ?
+        <div className="clear-modal-backdrop" role="presentation">
+          <div className="clear-modal-panel" role="dialog" aria-modal="true" aria-labelledby="clearAnnotationsTitle">
+            <span>Clear annotations</span>
+            <h2 id="clearAnnotationsTitle">Clear the current canvas?</h2>
+            <p>This removes all annotations on the active canvas for everyone in the workspace. Uploaded documents stay available.</p>
+            <div className="clear-modal-actions">
+              <button type="button" onClick={() => setClearModalOpen(false)}>Cancel</button>
+              <button type="button" className="danger" onClick={clearCurrentCanvasAnnotations}>Clear all</button>
+            </div>
+          </div>
+        </div> : null}
       {uploadStatus ?
         <div className="upload-progress-overlay" role="status" aria-live="polite">
           <div className="upload-progress-card">

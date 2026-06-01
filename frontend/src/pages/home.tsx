@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useHistory } from 'react-router-dom';
+import { Link, useHistory, useLocation } from 'react-router-dom';
 import MD5 from 'js-md5';
 import Button from '../components/custom-button';
 import { roomStore } from '../stores/room';
@@ -16,6 +16,7 @@ import {
   getAuthSession,
   getCurrentUser,
   inviteWorkspaceUser,
+  listWorkspaceMembers,
   listMyWorkspaces,
   loginUser,
   registerUser,
@@ -23,6 +24,7 @@ import {
   saveHexscrumProfile,
   searchUsers,
   setWorkspaceId,
+  updateWorkspaceMemberStatus,
 } from '../utils/hexscrum-api';
 
 type MemberRole = 'lead' | 'reviewer';
@@ -37,6 +39,18 @@ type WorkspaceRow = {
   participant_count: number
   document_count: number
   annotation_event_count: number
+}
+
+type WorkspaceMemberRow = {
+  id: string
+  workspace_id: string
+  user_id: string
+  role: string
+  color: string
+  status: string
+  user_name: string
+  user_email: string
+  user_designation: string
 }
 
 const hasAgoraAppId = Boolean(process.env.REACT_APP_AGORA_APP_ID);
@@ -58,10 +72,27 @@ function workspaceIdForName(roomName: string) {
   return `workspace-${MD5(normalizedWorkspaceKey(roomName))}`;
 }
 
+function generateWorkspaceCode() {
+  const bytes = new Uint8Array(4);
+  if (window.crypto && window.crypto.getRandomValues) {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    bytes.forEach((_, index) => {
+      bytes[index] = Math.floor(Math.random() * 255);
+    });
+  }
+  return Array.from(bytes)
+    .map((value) => value.toString(36).padStart(2, '0').slice(-2).toUpperCase())
+    .join('')
+    .replace(/(.{4})/, '$1-');
+}
+
 function HomePage() {
   document.title = t(`home.short_title.title`);
 
   const history = useHistory();
+  const location = useLocation();
+  const joinWorkspaceId = new URLSearchParams(location.search).get('join') || '';
   const session = getAuthSession();
   const [authUser, setAuthUser] = useState<any>(getCurrentUser());
   const [authMode, setAuthMode] = useState<'login' | 'register'>(session ? 'login' : 'register');
@@ -72,14 +103,19 @@ function HomePage() {
     designation: authUser ? authUser.designation : '',
     color: authUser ? authUser.color : defaultAuthForm.color,
   });
-  const [workspaceName, setWorkspaceName] = useState<string>('');
+  const [generatedWorkspaceCode, setGeneratedWorkspaceCode] = useState<string>(generateWorkspaceCode());
   const [workspaces, setWorkspaces] = useState<WorkspaceRow[]>([]);
+  const [invitations, setInvitations] = useState<any[]>([]);
   const [status, setStatus] = useState<string>('');
   const [backendHealth, setBackendHealth] = useState<any>({ checked: false, ok: true });
   const [shareWorkspace, setShareWorkspace] = useState<WorkspaceRow | null>(null);
   const [shareEmail, setShareEmail] = useState<string>('');
   const [userSearch, setUserSearch] = useState<string>('');
   const [userResults, setUserResults] = useState<any[]>([]);
+  const [shareLink, setShareLink] = useState<string>('');
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRow[]>([]);
+  const [autoJoinStarted, setAutoJoinStarted] = useState<boolean>(false);
+  const [workspaceLoadComplete, setWorkspaceLoadComplete] = useState<boolean>(false);
 
   useEffect(() => {
     if (!hasConverterUrl) return;
@@ -94,12 +130,16 @@ function HomePage() {
 
   const loadWorkspaces = () => {
     if (!authUser || !hasConverterUrl) return;
+    setWorkspaceLoadComplete(false);
     listMyWorkspaces()
       .then((data: any) => {
         setWorkspaces(data.workspaces || []);
+        setInvitations(data.invitations || []);
+        setWorkspaceLoadComplete(true);
       })
       .catch((err: any) => {
         setStatus(err.message);
+        setWorkspaceLoadComplete(true);
       });
   };
 
@@ -135,7 +175,11 @@ function HomePage() {
         color: data.user.color,
       });
       setStatus('Signed in');
-      listMyWorkspaces().then((result: any) => setWorkspaces(result.workspaces || [])).catch(() => {});
+      listMyWorkspaces().then((result: any) => {
+        setWorkspaces(result.workspaces || []);
+        setInvitations(result.invitations || []);
+        setWorkspaceLoadComplete(true);
+      }).catch(() => {});
     } catch (err) {
       setStatus(err.message || 'Authentication failed.');
     }
@@ -145,8 +189,22 @@ function HomePage() {
     clearAuthSession();
     setAuthUser(null);
     setWorkspaces([]);
+    setInvitations([]);
     setShareWorkspace(null);
+    setWorkspaceMembers([]);
+    setWorkspaceLoadComplete(false);
     setStatus('Signed out');
+  };
+
+  const loadWorkspaceMembers = (workspace: WorkspaceRow | null) => {
+    setShareWorkspace(workspace);
+    setWorkspaceMembers([]);
+    if (!workspace) return;
+    const role = roleForWorkspace(workspace);
+    if (role !== 'lead') return;
+    listWorkspaceMembers(workspace.id)
+      .then((data: any) => setWorkspaceMembers(data.members || []))
+      .catch((err: any) => setStatus(err.message));
   };
 
   const launchWorkspace = async (
@@ -180,6 +238,7 @@ function HomePage() {
 
     const payload = {
       uid,
+      authUserId: authUser.id,
       rid,
       role,
       roomName: cleanName,
@@ -260,6 +319,36 @@ function HomePage() {
     return 'reviewer';
   };
 
+  useEffect(() => {
+    if (!joinWorkspaceId || !authUser || autoJoinStarted || !workspaceLoadComplete) return;
+    const workspace = workspaces.find((item) => item.id === joinWorkspaceId);
+    if (!workspace) {
+      setStatus('This invite link is only available to invited users. Login or register with the invited email.');
+      return;
+    }
+    setAutoJoinStarted(true);
+    launchWorkspace(workspace.name, roleForWorkspace(workspace), workspace.id, workspace.member_color);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [joinWorkspaceId, authUser, autoJoinStarted, workspaceLoadComplete, workspaces]);
+
+  const createGeneratedWorkspace = () => {
+    const code = generatedWorkspaceCode || generateWorkspaceCode();
+    const name = `Workspace ${code}`;
+    const workspaceId = `workspace-${code.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+    launchWorkspace(name, 'lead', workspaceId);
+    setGeneratedWorkspaceCode(generateWorkspaceCode());
+  };
+
+  const copyShareLink = async () => {
+    if (!shareLink) return;
+    try {
+      await navigator.clipboard.writeText(shareLink);
+      setStatus('Invite link copied.');
+    } catch (err) {
+      setStatus('Copy failed. Select and copy the invite link manually.');
+    }
+  };
+
   const handleShare = () => {
     if (!shareWorkspace || !shareEmail.trim()) return;
     inviteWorkspaceUser(shareWorkspace.id, {
@@ -267,9 +356,23 @@ function HomePage() {
       role: 'reviewer',
     })
       .then(() => {
-        setStatus('Workspace shared.');
+        const link = `${window.location.origin}/?join=${encodeURIComponent(shareWorkspace.id)}`;
+        setShareLink(link);
+        setStatus('Workspace invite created. Share the link only with the invited reviewer.');
         setShareEmail('');
         setUserResults([]);
+        loadWorkspaceMembers(shareWorkspace);
+        loadWorkspaces();
+      })
+      .catch((err: any) => setStatus(err.message));
+  };
+
+  const updateMemberStatus = (member: WorkspaceMemberRow, nextStatus: 'active' | 'kicked' | 'blocked') => {
+    if (!shareWorkspace) return;
+    updateWorkspaceMemberStatus(shareWorkspace.id, member.user_id, nextStatus)
+      .then(() => {
+        setStatus(`${member.user_name || member.user_email || 'Reviewer'} marked as ${nextStatus}.`);
+        loadWorkspaceMembers(shareWorkspace);
         loadWorkspaces();
       })
       .catch((err: any) => setStatus(err.message));
@@ -338,6 +441,7 @@ function HomePage() {
             </>
           ) : null}
           {status ? <p className="auth-status">{status}</p> : null}
+          {joinWorkspaceId ? <p className="auth-status">Use the invited email to login or create an account for this workspace link.</p> : null}
           {!hasConverterUrl ? <p className="auth-status">Missing converter API URL. Auth needs REACT_APP_LIBRE_BACKEND_URL.</p> : null}
           <Button name={authMode === 'login' ? 'Login' : 'Create account'} onClick={handleAuthSubmit} />
         </section>
@@ -364,18 +468,20 @@ function HomePage() {
         <section className="dashboard-panel launch-panel">
           <span className="eyebrow">Start</span>
           <h2>Create or join workspace</h2>
-          <label>
-            Workspace name
-            <input value={workspaceName} onChange={(evt: any) => setWorkspaceName(evt.target.value)} />
-          </label>
+          <div className="workspace-code-card">
+            <span>Generated workspace code</span>
+            <strong>{generatedWorkspaceCode}</strong>
+            <small>Lead reviewers share this code through an invite link. Reviewers join from their previous or invited workspace list after login.</small>
+          </div>
           <div className="dashboard-actions">
-            <button onClick={() => launchWorkspace(workspaceName, 'lead')}>Create as lead</button>
-            <button onClick={() => launchWorkspace(workspaceName, 'reviewer')}>Join as reviewer</button>
+            <button onClick={createGeneratedWorkspace}>Create as lead</button>
+            <button onClick={() => setGeneratedWorkspaceCode(generateWorkspaceCode())}>New code</button>
           </div>
           <div className="setup-warnings">
             {!hasAgoraAppId ? <p>Missing Agora App ID. Live collaboration is disabled.</p> : null}
             {!hasConverterUrl ? <p>Missing converter URL. Upload, auth, and reports need the backend.</p> : null}
             {hasConverterUrl && backendHealth.checked && !backendHealth.ok ? <p>Backend health check failed.</p> : null}
+            {invitations.length ? <p>{invitations.length} pending invite will appear after the invited account logs in.</p> : null}
           </div>
           {status ? <p className="dashboard-status">{status}</p> : null}
         </section>
@@ -408,7 +514,7 @@ function HomePage() {
                   <div className="workspace-card-actions">
                     <button onClick={() => launchWorkspace(workspace.name, role, workspace.id, workspace.member_color)}>Open</button>
                     <Link onClick={() => setWorkspaceId(workspace.id)} to="/workspace-tools">History</Link>
-                    {role === 'lead' ? <button onClick={() => setShareWorkspace(workspace)}>Share</button> : null}
+                    {role === 'lead' ? <button onClick={() => loadWorkspaceMembers(workspace)}>Share</button> : null}
                     {role === 'lead' && workspace.status !== 'ended' ? <button onClick={() => handleEndWorkspace(workspace)}>End</button> : null}
                   </div>
                 </article>
@@ -424,6 +530,13 @@ function HomePage() {
             Workspace
             <input value={shareWorkspace ? shareWorkspace.name : ''} readOnly placeholder="Select Share on a workspace" />
           </label>
+          {shareWorkspace ? (
+            <div className="workspace-code-card compact">
+              <span>Invite code</span>
+              <strong>{shareWorkspace.id.replace(/^workspace-/, '').toUpperCase()}</strong>
+              <small>Access is still limited to invited users.</small>
+            </div>
+          ) : null}
           <label>
             Reviewer email
             <input value={shareEmail} onChange={(evt: any) => setShareEmail(evt.target.value)} />
@@ -431,6 +544,13 @@ function HomePage() {
           <div className="dashboard-actions">
             <button disabled={!shareWorkspace || !shareEmail.trim()} onClick={handleShare}>Send invite</button>
           </div>
+          {shareLink ? (
+            <div className="invite-link-box">
+              <span>Reviewer join link</span>
+              <input value={shareLink} readOnly />
+              <button onClick={copyShareLink}>Copy link</button>
+            </div>
+          ) : null}
           <div className="user-search-box">
             <label>
               Search previous users
@@ -446,6 +566,36 @@ function HomePage() {
               </button>
             ))}
           </div>
+          {shareWorkspace ? (
+            <div className="participant-manage-list">
+              <div className="section-heading-row compact-heading">
+                <div>
+                  <span className="eyebrow">Participants</span>
+                  <h3>Access control</h3>
+                </div>
+                <strong>{workspaceMembers.length}</strong>
+              </div>
+              {workspaceMembers.length ? workspaceMembers.map((member) => {
+                const isLead = member.role === 'lead' || member.user_id === shareWorkspace.owner_user_id;
+                return (
+                  <div key={`${member.workspace_id}-${member.user_id}`} className="participant-manage-row">
+                    <i style={{ background: member.color || '#EB5E28' }} />
+                    <div>
+                      <strong>{member.user_name || member.user_email || member.user_id}</strong>
+                      <span>{member.user_designation || member.user_email || member.role} · {member.status}</span>
+                    </div>
+                    {isLead ? <small>Lead</small> : (
+                      <div className="participant-actions">
+                        {member.status !== 'active' ? <button onClick={() => updateMemberStatus(member, 'active')}>Admit</button> : null}
+                        <button onClick={() => updateMemberStatus(member, 'kicked')}>Kick</button>
+                        <button onClick={() => updateMemberStatus(member, 'blocked')}>Block</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              }) : <p className="empty-state">No reviewers yet. Send an invite to add one.</p>}
+            </div>
+          ) : null}
         </section>
       </main>
     </div>

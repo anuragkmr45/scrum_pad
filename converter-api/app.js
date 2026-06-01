@@ -833,6 +833,37 @@ app.post(
   })
 );
 
+app.get(
+  "/api/workspaces/:id/members",
+  requireAuth(async function(req, res) {
+    const workspace = await auditStore.getWorkspace(req.params.id);
+    if (!workspace) return res.status(404).json({ error: "Workspace not found." });
+    if (workspace.owner_user_id && workspace.owner_user_id !== req.user.id) {
+      return res.status(403).json({ error: "Only the lead reviewer can view participant controls." });
+    }
+    const members = await auditStore.listWorkspaceMembers(req.params.id);
+    return res.status(200).json({ members });
+  })
+);
+
+app.patch(
+  "/api/workspaces/:id/members/:userId",
+  requireAuth(async function(req, res) {
+    const workspace = await auditStore.getWorkspace(req.params.id);
+    if (!workspace) return res.status(404).json({ error: "Workspace not found." });
+    if (workspace.owner_user_id && workspace.owner_user_id !== req.user.id) {
+      return res.status(403).json({ error: "Only the lead reviewer can manage participants." });
+    }
+    const member = await auditStore.updateWorkspaceMemberStatus({
+      workspaceId: req.params.id,
+      userId: req.params.userId,
+      status: req.body.status
+    });
+    if (!member) return res.status(404).json({ error: "Workspace member not found." });
+    return res.status(200).json({ member });
+  })
+);
+
 app.post(
   "/api/workspaces/:id/end",
   requireAuth(async function(req, res) {

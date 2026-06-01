@@ -26,7 +26,11 @@ import FiberManualRecordIcon from '@material-ui/icons/FiberManualRecord';
 import UndoIcon from '@material-ui/icons/Undo';
 import RedoIcon from '@material-ui/icons/Redo';
 import RotateRightIcon from '@material-ui/icons/RotateRight';
+import KeyboardArrowDownIcon from '@material-ui/icons/KeyboardArrowDown';
+import KeyboardArrowUpIcon from '@material-ui/icons/KeyboardArrowUp';
+import PeopleIcon from '@material-ui/icons/People';
 import { undoAnnotations, redoAnnotations, getAnnotationHistoryState, addHistoryStateListener } from '../../utils/annotation-history';
+import { getWorkspaceId, listWorkspaceMembers, updateWorkspaceMemberStatus } from '../../utils/hexscrum-api';
 
 
 interface ControlItemProps {
@@ -77,10 +81,25 @@ type ExportCanvasOption = {
   pageCount: number
 }
 
+type ExportPreviewItem = ExportCanvasOption & {
+  imageUrl: string
+}
+
 type ExportParticipant = {
   uid: string
+  authUserId?: string
   name: string
   role: string
+}
+
+type WorkspaceMemberRow = {
+  user_id: string
+  user_name: string
+  user_email: string
+  user_designation: string
+  role: string
+  color: string
+  status: string
 }
 export const toggleNext = (
   setCanvasNumber?: any,
@@ -267,6 +286,28 @@ function getPdfOrientation(
   return canvas.width >= canvas.height ? 'l' : 'p';
 }
 
+function captureCanvasForExport(
+  viewer: HTMLElement,
+  includeAnnotations: boolean,
+  scale: number = 1
+) {
+  return html2canvas(viewer, {
+    backgroundColor: '#ffffff',
+    useCORS: true,
+    scale,
+    onclone: (clonedDocument: Document) => {
+      if (includeAnnotations) return;
+      const clonedViewer = clonedDocument.getElementById(viewer.id);
+      if (!clonedViewer) return;
+      clonedViewer
+        .querySelectorAll('svg.customAnnotationLayer')
+        .forEach((layer: Element) => {
+          (layer as HTMLElement).style.display = 'none';
+        });
+    },
+  });
+}
+
 export default function Control({
   onClick,
   role,
@@ -286,10 +327,17 @@ export default function Control({
   const [selectedExportCanvasIds, setSelectedExportCanvasIds] = useState<string[]>([]);
   const [exportOrientation, setExportOrientation] = useState<ExportOrientation>('auto');
   const [exportRotation, setExportRotation] = useState<number>(0);
+  const [exportIncludeAnnotations, setExportIncludeAnnotations] = useState(true);
+  const [exportPreviewItems, setExportPreviewItems] = useState<ExportPreviewItem[]>([]);
+  const [isGeneratingPreview, setGeneratingPreview] = useState(false);
   const [isExporting, setExporting] = useState(false);
   const [historyState, setHistoryState] = useState(getAnnotationHistoryState());
+  const [controlsCollapsed, setControlsCollapsed] = useState(false);
+  const [participantPanelOpen, setParticipantPanelOpen] = useState(false);
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRow[]>([]);
   let recorder = useRef<any>();
   let desktopStream = useRef<any>();
+  const previewRequestId = useRef(0);
   // to get current canvas number
   const [currentCanvasNumber, setCanvasNumber] = useState(1);
   const isLiveReview = useMemo(() => Boolean(location.pathname.match(/one-to-one/)), [location.pathname]);
@@ -305,6 +353,7 @@ export default function Control({
   const canAnnotate = fileState.canAnnotate !== false;
   const canManageWorkspace = Boolean(fileState.canManageWorkspace || role === 'teacher');
   const canManageCanvas = canManageWorkspace;
+  const canExportWorkspace = canAnnotate || canManageWorkspace;
 
   useEffect(() => {
     const removeListener = addHistoryStateListener((event: any) => {
@@ -397,6 +446,7 @@ export default function Control({
         const uid = String(user.uid || `participant-${index}`);
         participantMap[uid] = {
           uid,
+          authUserId: user.authUserId,
           name: user.account || (uid === String(me.uid) ? me.account : '') || 'Unknown',
           role: user.role === 'teacher' ? 'Lead reviewer' : 'Reviewer',
         };
@@ -406,7 +456,129 @@ export default function Control({
     setSelectedExportCanvasIds(canvases.map((canvas) => canvas.id));
     setExportOrientation('auto');
     setExportRotation(0);
+    setExportIncludeAnnotations(true);
+    setExportPreviewItems([]);
     setExportDialogOpen(true);
+  };
+
+  const refreshExportPreview = async () => {
+    if (!exportDialogOpen) return;
+    if (!selectedExportCanvasIds.length) {
+      setExportPreviewItems([]);
+      return;
+    }
+
+    const requestId = previewRequestId.current + 1;
+    previewRequestId.current = requestId;
+    setGeneratingPreview(true);
+    try {
+      await activediv('active');
+      const viewers = Array.from(
+        document.querySelectorAll('#main-container > .pdfViewer')
+      ).filter((viewer) => selectedExportCanvasIds.includes((viewer as HTMLElement).id)) as HTMLElement[];
+
+      const nextPreviewItems: ExportPreviewItem[] = [];
+      for (const viewer of viewers) {
+        const canvasMeta = exportCanvases.find((item) => item.id === viewer.id);
+        const previewCanvas = await captureCanvasForExport(viewer, exportIncludeAnnotations, 0.28);
+        if (previewRequestId.current !== requestId) return;
+        nextPreviewItems.push({
+          id: viewer.id,
+          label: canvasMeta ? canvasMeta.label : viewer.id.replace('viewerContainer', 'Canvas '),
+          pageCount: canvasMeta ? canvasMeta.pageCount : viewer.querySelectorAll('.page').length || 1,
+          imageUrl: previewCanvas.toDataURL('image/jpeg', 0.72),
+        });
+      }
+      if (previewRequestId.current === requestId) {
+        setExportPreviewItems(nextPreviewItems);
+      }
+    } catch (err) {
+      if (previewRequestId.current === requestId) {
+        setExportPreviewItems([]);
+      }
+    } finally {
+      await activediv('deactive');
+      if (previewRequestId.current === requestId) {
+        setGeneratingPreview(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!exportDialogOpen) return;
+    refreshExportPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportDialogOpen, selectedExportCanvasIds, exportIncludeAnnotations]);
+
+  const loadParticipants = () => {
+    const workspaceId = getWorkspaceId() || roomStore._state.course.rid || '';
+    if (!workspaceId || !canManageWorkspace) return;
+    listWorkspaceMembers(workspaceId)
+      .then((data: any) => setWorkspaceMembers(data.members || []))
+      .catch((err: any) => {
+        globalStore.showToast({
+          type: 'notice-board',
+          message: err.message || 'Unable to load participants',
+        });
+      });
+  };
+
+  const toggleParticipantPanel = () => {
+    const next = !participantPanelOpen;
+    setParticipantPanelOpen(next);
+    if (next) loadParticipants();
+  };
+
+  const activeParticipants = () => {
+    const me = roomStore._state.me || {};
+    const participantMap: { [key: string]: any } = {};
+    if (me.uid) participantMap[String(me.uid)] = me;
+    roomStore._state.users.toArray().forEach((user: any) => {
+      if (user.uid) participantMap[String(user.uid)] = user;
+    });
+    return Object.values(participantMap).filter((user: any) => user.uid);
+  };
+
+  const memberForParticipant = (participant: any) => {
+    if (!participant.authUserId) return null;
+    return workspaceMembers.find((member) => member.user_id === participant.authUserId) || null;
+  };
+
+  const updateParticipantStatus = async (participant: any, status: 'active' | 'kicked' | 'blocked') => {
+    const workspaceId = getWorkspaceId() || roomStore._state.course.rid || '';
+    if (!workspaceId || !participant.authUserId) {
+      globalStore.showToast({
+        type: 'notice-board',
+        message: 'Participant identity is not available yet.',
+      });
+      return;
+    }
+
+    try {
+      await updateWorkspaceMemberStatus(workspaceId, participant.authUserId, status);
+      if (status !== 'active') {
+        await roomStore.rtmClient.sendChannelMessage(JSON.stringify({
+          type: 'participant-status',
+          workspaceId,
+          targetUid: participant.uid,
+          targetAuthUserId: participant.authUserId,
+          status,
+          message: status === 'blocked'
+            ? 'The lead reviewer blocked your access to this workspace.'
+            : 'The lead reviewer removed you from this workspace.',
+        }));
+      }
+      loadParticipants();
+      globalStore.showToast({
+        type: 'notice-board',
+        message: `${participant.account || 'Reviewer'} marked as ${status}.`,
+      });
+    } catch (err) {
+      globalStore.showToast({
+        type: 'notice-board',
+        message: err.message || 'Unable to update participant status',
+      });
+    }
   };
 
   const toggleExportCanvas = (canvasId: string) => {
@@ -455,10 +627,7 @@ export default function Control({
       let pdf: any = null;
 
       for (let i = 0; i < viewers.length; i++) {
-        const sourceCanvas = await html2canvas(viewers[i], {
-          backgroundColor: '#ffffff',
-          useCORS: true,
-        });
+        const sourceCanvas = await captureCanvasForExport(viewers[i], exportIncludeAnnotations);
         const canvas = rotateCanvas(sourceCanvas, exportRotation);
         const pageOrientation = getPdfOrientation(exportOrientation, canvas);
 
@@ -489,7 +658,7 @@ export default function Control({
 
       const roomName = roomStore._state.course.roomName || 'workspace';
       const fileName = roomName.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'workspace';
-      pdf.save(`${fileName}-annotated.pdf`);
+      pdf.save(`${fileName}-${exportIncludeAnnotations ? 'annotated' : 'clean'}.pdf`);
       setExportDialogOpen(false);
     } catch (err) {
       globalStore.showToast({
@@ -650,8 +819,16 @@ export default function Control({
               onClick={onClick} />
             : null}
         </div>
+        <button
+          type="button"
+          className={`control-collapse-toggle ${controlsCollapsed ? 'collapsed' : ''}`}
+          onClick={() => setControlsCollapsed(!controlsCollapsed)}
+          aria-label={controlsCollapsed ? 'Open bottom toolbar' : 'Close bottom toolbar'}
+        >
+          {controlsCollapsed ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+        </button>
         {canAnnotate || canManageCanvas || showTool ?
-          <div className="controls">
+          <div className={`controls ${controlsCollapsed ? 'is-collapsed' : ''}`}>
             {canAnnotate ?
               <>
                 <div className={`control-button history-control ${historyState.canUndo ? '' : 'disabled'}`}>
@@ -711,13 +888,19 @@ export default function Control({
                       <span className="tooltiptext">Remove Canvas</span>
                     </div> : null
                 }
-                <div className='control-button'>
-                  <GetAppIcon onClick={openExportDialog} />
-                  <span className="tooltiptext">Export annotated PDF</span>
-                </div>
                 <div className="menu-split" style={{ marginLeft: '7px', marginRight: '7px' }}></div>
               </> : null
             }
+            {canExportWorkspace ?
+              <div className='control-button'>
+                <GetAppIcon onClick={openExportDialog} />
+                <span className="tooltiptext">Export annotated PDF</span>
+              </div> : null}
+            {canManageWorkspace ?
+              <div className='control-button'>
+                <PeopleIcon onClick={toggleParticipantPanel} />
+                <span className="tooltiptext">Participants</span>
+              </div> : null}
             {
               role === 'teacher' ?
                 (
@@ -779,6 +962,37 @@ export default function Control({
               : null}
 
           </div> : null}
+        {participantPanelOpen && canManageWorkspace ?
+          <div className="participant-control-panel">
+            <div className="participant-control-header">
+              <div>
+                <span>Lead controls</span>
+                <strong>Participants</strong>
+              </div>
+              <button onClick={() => setParticipantPanelOpen(false)}>Close</button>
+            </div>
+            <div className="participant-control-list">
+              {activeParticipants().map((participant: any) => {
+                const linkedMember = memberForParticipant(participant);
+                const isSelf = String(participant.uid) === String(roomStore._state.me.uid);
+                return (
+                  <div key={participant.uid} className="participant-control-row">
+                    <div>
+                      <strong>{participant.account || participant.uid}</strong>
+                      <span>{participant.role === 'teacher' ? 'Lead reviewer' : 'Reviewer'} · {linkedMember ? linkedMember.status : 'live'}</span>
+                    </div>
+                    {isSelf || participant.role === 'teacher' ? <small>{isSelf ? 'You' : 'Lead'}</small> : (
+                      <div className="participant-control-actions">
+                        {linkedMember && linkedMember.status !== 'active' ? <button onClick={() => updateParticipantStatus(participant, 'active')}>Admit</button> : null}
+                        <button onClick={() => updateParticipantStatus(participant, 'kicked')}>Kick</button>
+                        <button onClick={() => updateParticipantStatus(participant, 'blocked')}>Block</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div> : null}
       </div>
       <PollCard
         createFlag={createPollFlag}
@@ -823,6 +1037,28 @@ export default function Control({
             </div>
 
             <div className="export-modal-section">
+              <strong>Annotation layer</strong>
+              <div className="export-segmented export-annotation-toggle">
+                <button
+                  type="button"
+                  className={exportIncludeAnnotations ? 'active' : ''}
+                  disabled={isExporting}
+                  onClick={() => setExportIncludeAnnotations(true)}
+                >
+                  With annotations
+                </button>
+                <button
+                  type="button"
+                  className={!exportIncludeAnnotations ? 'active' : ''}
+                  disabled={isExporting}
+                  onClick={() => setExportIncludeAnnotations(false)}
+                >
+                  Document only
+                </button>
+              </div>
+            </div>
+
+            <div className="export-modal-section">
               <strong>Page direction</strong>
               <div className="export-segmented">
                 {(['auto', 'portrait', 'landscape'] as ExportOrientation[]).map((option) => (
@@ -859,6 +1095,22 @@ export default function Control({
 
             <div className="export-modal-section export-preview-section">
               <strong>Preview</strong>
+              <div className="export-thumbnail-strip">
+                {isGeneratingPreview ?
+                  <div className="export-preview-loading">Generating preview...</div> :
+                  exportPreviewItems.length ?
+                    exportPreviewItems.map((preview) => (
+                      <figure key={preview.id} className="export-thumbnail-card">
+                        <img src={preview.imageUrl} alt={`${preview.label} export preview`} />
+                        <figcaption>
+                          <strong>{preview.label}</strong>
+                          <span>{preview.pageCount} page{preview.pageCount === 1 ? '' : 's'} · {exportIncludeAnnotations ? 'with annotations' : 'document only'}</span>
+                        </figcaption>
+                      </figure>
+                    )) :
+                    <div className="export-preview-loading">Select a canvas to preview.</div>
+                }
+              </div>
               <div className="export-preview-card">
                 <div>
                   <span>Canvases</span>
@@ -871,6 +1123,10 @@ export default function Control({
                 <div>
                   <span>Rotation</span>
                   <strong>{exportRotation}°</strong>
+                </div>
+                <div>
+                  <span>Annotations</span>
+                  <strong>{exportIncludeAnnotations ? 'included' : 'hidden'}</strong>
                 </div>
               </div>
               <div className="export-participants">
