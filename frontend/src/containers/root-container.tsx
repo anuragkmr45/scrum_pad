@@ -194,7 +194,8 @@ export const RootProvider: React.FC<any> = ({children}) => {
                 viewport: msg.viewport,
                 annotations: msg.annotations,
                 status: msg.status,
-                annotationId: msg.annotationId
+                annotationId: msg.annotationId,
+                senderUid: msg.senderUid
               }
               roomStore.sendAnnotation(annotationData)
               break;
@@ -213,12 +214,14 @@ export const RootProvider: React.FC<any> = ({children}) => {
 
         default:
       }
-      var totalVotes = 0;
-      msg.answer.map((answer:any) => {
-        if (answer.votes) totalVotes += answer.votes
-          return answer
-        });
-      roomStore.updateVote(totalVotes);
+      if (Array.isArray(msg.answer)) {
+        var totalVotes = 0;
+        msg.answer.map((answer:any) => {
+          if (answer.votes) totalVotes += answer.votes
+            return answer
+          });
+        roomStore.updateVote(totalVotes);
+      }
     });
     return () => {
       rtmClient.removeAllListeners();

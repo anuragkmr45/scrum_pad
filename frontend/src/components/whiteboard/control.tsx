@@ -66,21 +66,27 @@ interface ControlProps {
   notice?: NoticeProps
   onClick: (evt: any, type: string) => void
 }
-export const toggleNext = (setCanvasNumber: any, pdfFiles: any, setTotalPages: any) => {
+export const toggleNext = (
+  setCanvasNumber?: any,
+  pdfFiles: any = [],
+  setTotalPages?: any,
+  shouldBroadcast: boolean = true
+) => {
   let current = document.getElementsByClassName('pdfViewer active')[0];
-  let next = document.getElementsByClassName('pdfViewer active')[0].nextElementSibling;
+  if (!current) return;
+  let next = current.nextElementSibling;
   if (next) {
     globalStore.showToast({
       type: 'notice-board',
       message: t('toast.toggle_page')
     });
-    if (roomStore._state.me.role === "teacher")
+    if (shouldBroadcast) {
       sendToRemote("", "", "next-page", "");
+    }
     current.classList.remove('active');
     next.classList.add('active');
 
-
-    if (roomStore._state.me.role === "teacher") {
+    if (typeof setCanvasNumber === 'function' && Array.isArray(pdfFiles)) {
       // changing current canvas number
       const currentCanvasNumber = next.id.substring(15);
       if (isNaN(parseInt(currentCanvasNumber))) {
@@ -90,7 +96,9 @@ export const toggleNext = (setCanvasNumber: any, pdfFiles: any, setTotalPages: a
         const currentCanvasIndex = pdfFiles.indexOf(parseInt(currentCanvasNumber));
         setCanvasNumber(currentCanvasIndex + 1);
       }
+    }
 
+    if (typeof setTotalPages === 'function') {
       // set total pages in canvas
       let totalPages = next?.childElementCount;
       setTotalPages(totalPages)
@@ -98,22 +106,28 @@ export const toggleNext = (setCanvasNumber: any, pdfFiles: any, setTotalPages: a
   }
 }
 
-export const togglePrev = (setCanvasNumber: any, pdfFiles: any, setTotalPages: any) => {
+export const togglePrev = (
+  setCanvasNumber?: any,
+  pdfFiles: any = [],
+  setTotalPages?: any,
+  shouldBroadcast: boolean = true
+) => {
   let current = document.getElementsByClassName('pdfViewer active')[0];
-  let previous = document.getElementsByClassName('pdfViewer active')[0].previousElementSibling;
+  if (!current) return;
+  let previous = current.previousElementSibling;
 
   if (previous) {
     globalStore.showToast({
       type: 'notice-board',
       message: t('toast.toggle_page')
     });
-    if (roomStore._state.me.role === "teacher")
+    if (shouldBroadcast) {
       sendToRemote("", "", "prev-page", "");
+    }
     current.classList.remove('active');
     previous.classList.add('active');
 
-
-    if (roomStore._state.me.role === "teacher") {
+    if (typeof setCanvasNumber === 'function' && Array.isArray(pdfFiles)) {
       // changing current canvas number
       const currentCanvasNumber = previous.id.substring(15);
 
@@ -124,7 +138,9 @@ export const togglePrev = (setCanvasNumber: any, pdfFiles: any, setTotalPages: a
         const currentCanvasIndex = pdfFiles.indexOf(parseInt(currentCanvasNumber))
         setCanvasNumber(currentCanvasIndex + 1)
       }
+    }
 
+    if (typeof setTotalPages === 'function') {
       // set total pages in a canvas
       let totalPages = previous?.childElementCount;
       setTotalPages(totalPages)
@@ -133,17 +149,27 @@ export const togglePrev = (setCanvasNumber: any, pdfFiles: any, setTotalPages: a
   }
 }
 
-export const toggleFirstLast = (item: any, setCanvasNumber: any, pdfFiles: any, setTotalPages: any) => {
+export const toggleFirstLast = (
+  item: any,
+  setCanvasNumber?: any,
+  pdfFiles: any = [],
+  setTotalPages?: any,
+  shouldBroadcast: boolean = true
+) => {
 
-  if (item === "first" && (document.getElementById('main-container')!.firstChild as HTMLElement).classList.contains('active')) {
+  const container = document.getElementById('main-container');
+  if (!container) return;
+
+  if (item === "first" && (container.firstChild as HTMLElement).classList.contains('active')) {
     return;
-  } else if (item === "last" && (document.getElementById('main-container')!.lastChild as HTMLElement).classList.contains('active')) {
+  } else if (item === "last" && (container.lastChild as HTMLElement).classList.contains('active')) {
     return;
   }
 
   let current = document.getElementsByClassName('pdfViewer active')[0];
+  if (!current) return;
 
-  if (roomStore._state.me.role === "teacher") {
+  if (shouldBroadcast) {
     sendToRemote("", "", 'toggleFirstLast', item);
   }
 
@@ -155,12 +181,13 @@ export const toggleFirstLast = (item: any, setCanvasNumber: any, pdfFiles: any, 
   current.classList.remove('active');
   document.querySelector(`.pdfViewer:${item}-child`)!.classList.add('active');
 
-
-  if (roomStore._state.me.role === "teacher") {
+  if (typeof setCanvasNumber === 'function' && Array.isArray(pdfFiles)) {
 
     let totalPages = null;
     if (item === 'first') {
-      setTotalPages(1);
+      if (typeof setTotalPages === 'function') {
+        setTotalPages(1);
+      }
       // set current canvas number to 1
       setCanvasNumber(1);
     } else {
@@ -174,7 +201,9 @@ export const toggleFirstLast = (item: any, setCanvasNumber: any, pdfFiles: any, 
         const currentCanvasIndex = pdfFiles.indexOf(parseInt(value!))
         setCanvasNumber(currentCanvasIndex + 1)
       }
+    }
 
+    if (typeof setTotalPages === 'function') {
       // set total pages for current active canvas
       totalPages = document.getElementsByClassName('pdfViewer active')[0].childElementCount;
       setTotalPages(totalPages)
@@ -199,6 +228,8 @@ export default function Control({
   let desktopStream = useRef<any>();
   // to get current canvas number
   const [currentCanvasNumber, setCanvasNumber] = useState(1);
+  const isLiveReview = useMemo(() => Boolean(location.pathname.match(/one-to-one/)), [location.pathname]);
+  const canManageCanvas = useMemo(() => role === 'teacher' || isLiveReview, [isLiveReview, role]);
   const showCreate: boolean = useMemo(() => {
 
     if (role === 'teacher' && (location.pathname.match(/big-class/) || location.pathname.match(/small-class/))) {
@@ -459,9 +490,9 @@ export default function Control({
               onClick={onClick} />
             : null}
         </div>
-        {(role === 'teacher') || showTool ?
+        {canManageCanvas || showTool ?
           <div className="controls">
-            {role === 'teacher' ?
+            {canManageCanvas ?
               <>
                 <div className="control-button">
                   <FirstPageIcon onClick={() => toggleFirstLast('first', setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages)}>
@@ -534,7 +565,7 @@ export default function Control({
             <div className="menu-split" style={{ marginLeft: '7px', marginRight: '7px' }}></div>
 
             {
-              role === 'teacher' && roomType === 0 ?
+              role === 'teacher' && roomType === 0 && !isLiveReview ?
                 (
                   <>
                     {
@@ -562,7 +593,7 @@ export default function Control({
                 </> : null
               : null}
 
-            {role === 'student' ?
+            {role === 'student' && !isLiveReview ?
               <>
                 <ControlItem
                   name={isHost ? 'hands_up_end' : 'hands_up'}

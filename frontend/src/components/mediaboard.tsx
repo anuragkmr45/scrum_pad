@@ -196,13 +196,14 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
 
   const showControl: boolean = useMemo(() => {
     if (me.role === 'teacher') return true;
+    if (isLiveReview && canUseTools) return true;
     if (location.pathname.match(/big-class/) || location.pathname.match(/small-class/)) {
       if (me.role === 'student') {
         return true;
       }
     }
     return false;
-  }, [location.pathname, me.role]);
+  }, [canUseTools, isLiveReview, location.pathname, me.role]);
 
   const drawable: string = useMemo(() => {
     if (location.pathname.match('small-class|big-class')) {
@@ -301,9 +302,9 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
 
   const handleScroll = () => {
 
-    if(roomStore._state.me.role === "teacher") {
+    if(canUseTools && !(window as any).__hexscrumApplyingRemoteScroll) {
       const sendScrollPosition = () => {
-        const board = document.querySelector('.media-board.drawable') as HTMLElement | null;
+        const board = document.querySelector('.media-board') as HTMLElement | null;
         if (!board) return;
         lastScrollSentAt.current = Date.now();
         sendToRemote("", "", "sync-scroll", board.scrollTop);

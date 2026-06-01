@@ -31,6 +31,7 @@ export const sendToRemote = async (
     type: "annotation",
     status: status,
     annotationId: annotationId,
+    senderUid: roomStore._state.me.uid,
   };
   try {
     await rtmClient.sendChannelMessage(JSON.stringify(rendering));
@@ -224,6 +225,9 @@ const Whiteboard = () => {
       // roomStore._state.me.role != "teacher"
     ) {
       let annotate = roomStore._state.annotatePdf;
+      if (annotate.senderUid && `${annotate.senderUid}` === `${roomStore._state.me.uid}`) {
+        return;
+      }
       let annotations = annotate.annotations;
       let pageNumber = annotate.annotations.annotations.page ? annotate.annotations.annotations.page : 1
       let svg;
@@ -337,12 +341,10 @@ const Whiteboard = () => {
             break;
           } 
           case 'add-page': {
-            if(roomStore._state.me.role !== "teacher") {
-              fileState.fileDispatch({
-                type: "remote-add-page",
-                fileId: annotations.documentId,
-              });
-            }
+            fileState.fileDispatch({
+              type: "remote-add-page",
+              fileId: annotations.documentId,
+            });
             break;
           }  
           case 'add-uploaded-page': {
@@ -355,44 +357,41 @@ const Whiteboard = () => {
             break;
           } 
           case 'remove-page': {
-            if(roomStore._state.me.role !== "teacher") {
-              arrayStoreAdapter.resetAnnotation(
-                roomStore._state.annotatePdf.annotationId
-              );
-              let annotationLayers = document.querySelectorAll(
-                `[data-pdf-annotate-document="${roomStore._state.annotatePdf.annotationId}"]`
-              );
-              annotationLayers.forEach(function (item) {
-                item.innerHTML = "";
-              });
-              fileState.fileDispatch({
-                type: "remote-remove-page",
-                fileId: annotations.documentId,
-              });
-            }
+            arrayStoreAdapter.resetAnnotation(
+              roomStore._state.annotatePdf.annotationId
+            );
+            let annotationLayers = document.querySelectorAll(
+              `[data-pdf-annotate-document="${roomStore._state.annotatePdf.annotationId}"]`
+            );
+            annotationLayers.forEach(function (item) {
+              item.innerHTML = "";
+            });
+            fileState.fileDispatch({
+              type: "remote-remove-page",
+              fileId: annotations.documentId,
+            });
             break;
           }
           case 'next-page': {
-            if(roomStore._state.me.role !== "teacher") {
-              toggleNext();
-            }
+            toggleNext(undefined, undefined, undefined, false);
             break;
           }
           case 'prev-page': {
-            if(roomStore._state.me.role !== "teacher") {
-              togglePrev();
-            }
+            togglePrev(undefined, undefined, undefined, false);
             break;
           }
           case 'toggleFirstLast': {
-            if(roomStore._state.me.role !== "teacher") {
-              toggleFirstLast(roomStore._state.annotatePdf.annotationId);
-            }
+            toggleFirstLast(roomStore._state.annotatePdf.annotationId, undefined, undefined, undefined, false);
             break;
           }        
           case 'sync-scroll': {
-            if(roomStore._state.me.role !== "teacher") {
-              document.querySelector(".media-board").scrollTop = roomStore._state.annotatePdf.annotationId;
+            const board = document.querySelector(".media-board");
+            if (board) {
+              window.__hexscrumApplyingRemoteScroll = true;
+              board.scrollTop = roomStore._state.annotatePdf.annotationId;
+              window.setTimeout(() => {
+                window.__hexscrumApplyingRemoteScroll = false;
+              }, 80);
             }
             break
           }

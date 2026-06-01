@@ -12,7 +12,7 @@ function canJoin({ onlineStatus, roomType, channelCount, role }: { onlineStatus:
     permitted: true,
     reason: ''
   }
-  const channelCountLimit = [2, 17, Infinity];
+  const channelCountLimit = [17, 17, Infinity];
 
   let maximum = channelCountLimit[roomType];
   if (channelCount >= maximum) {
@@ -120,7 +120,7 @@ export type AnnouncementData = {
 }
 
 export type AnnotatePdfData={
-  annotations:any,type:any,status:any,annotationId:any
+  annotations:any,type:any,status:any,annotationId:any,senderUid?: any
 }
 export type pdfData={
   file:any,
@@ -575,7 +575,8 @@ export class RoomStore {
         annotations:data.annotations,
         type:data.type,
         status: data.status,
-        annotationId: data.annotationId
+        annotationId: data.annotationId,
+        senderUid: data.senderUid
       }
     }
     this.commit(this.state);

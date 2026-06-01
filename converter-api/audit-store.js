@@ -193,8 +193,14 @@ async function createWorkspace(body) {
   };
   if (!pool) {
     const existing = memory.workspaces.find(item => item.id === workspace.id);
-    if (existing) Object.assign(existing, workspace);
-    else memory.workspaces.push(workspace);
+    if (existing) {
+      Object.assign(existing, {
+        ...workspace,
+        owner_user_id: existing.owner_user_id || workspace.owner_user_id
+      });
+      return existing;
+    }
+    memory.workspaces.push(workspace);
     return workspace;
   }
   const result = await query(
@@ -202,8 +208,8 @@ async function createWorkspace(body) {
      VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (id) DO UPDATE SET
        name = EXCLUDED.name,
-       owner_user_id = EXCLUDED.owner_user_id,
-       metadata = EXCLUDED.metadata
+       owner_user_id = COALESCE(NULLIF(workspaces.owner_user_id, ''), EXCLUDED.owner_user_id),
+       metadata = workspaces.metadata || EXCLUDED.metadata
      RETURNING *`,
     [workspace.id, workspace.name, workspace.owner_user_id, workspace.status, workspace.metadata, workspace.started_at]
   );

@@ -9,7 +9,7 @@ import { t } from '../../i18n';
 import { fetchAgoraRtmToken } from '../../utils/hexscrum-api';
 
 export const roomTypes = [
-  {value: 0, text: 'One-on-One', path: 'one-to-one'},
+  {value: 0, text: 'Live Workspace', path: 'one-to-one'},
   {value: 1, text: 'Small Class', path: 'small-class'},
   {value: 2, text: 'Large Class', path: 'big-class'},
 ];

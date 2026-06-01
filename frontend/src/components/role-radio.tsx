@@ -22,8 +22,9 @@ const useStyles = makeStyles ((theme: Theme) => ({
 
 export default function (props: any) {
   const classes = useStyles();
+  const value = props.value !== undefined ? props.value : (props.role || '');
   return (
-    <RadioGroup className={classes.radioGroup} row value={props.role} onChange={props.onChange}>
+    <RadioGroup className={classes.radioGroup} row value={value} onChange={props.onChange}>
       <FormControlLabel
         className={"custom-radio align-left"}
         value="teacher"

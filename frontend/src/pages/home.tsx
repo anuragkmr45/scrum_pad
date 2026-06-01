@@ -45,6 +45,10 @@ const hasAgoraAppId = Boolean(process.env.REACT_APP_AGORA_APP_ID);
 const hasConverterUrl = Boolean(process.env.REACT_APP_LIBRE_BACKEND_URL);
 const storedProfile = getHexscrumProfile();
 
+function normalizedWorkspaceKey(roomName: string) {
+  return roomName.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 function HomePage() {
   document.title = t(`home.short_title.title`)
   const classes = useStyles();
@@ -92,7 +96,10 @@ function HomePage() {
       return;
     }
 
-    if (!session.roomName) {
+    const workspaceName = session.roomName.trim();
+    const workspaceKey = normalizedWorkspaceKey(session.roomName);
+
+    if (!workspaceName) {
       setRequired({...required, roomName: t('home.missing_room_name')});
       return;
     }
@@ -110,9 +117,9 @@ function HomePage() {
     const path = roomTypes[session.roomType].path
     const payload = {
       uid: genUid(),
-      rid: `${session.roomType}${MD5(session.roomName)}`,
+      rid: `workspace-${MD5(workspaceKey)}`,
       role: session.role,
-      roomName: session.roomName,
+      roomName: workspaceName,
       roomType: session.roomType,
       video: 0,
       audio: 0,
@@ -140,7 +147,7 @@ function HomePage() {
       setWorkspaceId(payload.rid);
       createWorkspace({
         id: payload.rid,
-        name: session.roomName,
+        name: workspaceName,
         ownerUserId: payload.uid,
         metadata: {
           roomType: session.roomType,
