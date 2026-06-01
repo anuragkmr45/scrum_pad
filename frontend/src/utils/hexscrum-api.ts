@@ -7,7 +7,8 @@ export type HexscrumProfile = {
 
 const PROFILE_KEY = 'hexscrum_profile';
 const WORKSPACE_ID_KEY = 'hexscrum_workspace_id';
-const DEFAULT_COLOR = '#2563EB';
+const DEFAULT_COLOR = '#EB5E28';
+const LEGACY_DEFAULT_COLOR = '#2563EB';
 
 function readJson(key: string) {
   try {
@@ -30,11 +31,15 @@ export function getBackendBaseUrl() {
 
 export function getHexscrumProfile(): HexscrumProfile {
   const stored = readJson(PROFILE_KEY) || {};
+  const color = stored.color && String(stored.color).toUpperCase() !== LEGACY_DEFAULT_COLOR
+    ? stored.color
+    : DEFAULT_COLOR;
+
   return {
     userId: stored.userId || '',
     name: stored.name || '',
     designation: stored.designation || '',
-    color: stored.color || DEFAULT_COLOR,
+    color,
   };
 }
 

@@ -200,9 +200,24 @@ function HomePage() {
       <div className="card-info">
         <div className="card-info-block">
         <span className="card-title">
-          <h3>Document Workspace for live review, meeting notes, and annotation reports</h3>
-          <p>HexScrum Workspace is a fast MVP base for collaborative document review. It keeps the proven open-source whiteboard path while presenting enterprise review language for local demos.</p>
+          <span className="eyebrow">Live review workspace</span>
+          <h3>Review documents together, track every mark, and leave with usable exports.</h3>
+          <p>Upload PDFs, Office files, spreadsheets, presentations, or images. Everyone in the workspace can annotate together while HexScrum records ownership, designation, timestamps, and report-ready history.</p>
         </span>
+        <div className="home-feature-grid" aria-label="Core workspace features">
+          <div>
+            <strong>Collaborate</strong>
+            <span>Lead plus multiple reviewers in one shared workspace.</span>
+          </div>
+          <div>
+            <strong>Track</strong>
+            <span>User-wise annotation history with name, role, and time.</span>
+          </div>
+          <div>
+            <strong>Export</strong>
+            <span>Annotated PDF, notes, history, user reports, and archive manifest.</span>
+          </div>
+        </div>
         <div className="setup-warnings">
           {!hasAgoraAppId ? <p>Missing Agora App ID. Live collaboration is disabled until REACT_APP_AGORA_APP_ID is set.</p> : null}
           {!hasConverterUrl ? <p>Missing converter URL. Upload conversion needs REACT_APP_LIBRE_BACKEND_URL.</p> : null}
@@ -210,15 +225,34 @@ function HomePage() {
         </div>
         <div className="home-links">
           <Link className="roadmap-link" to="/workspace-tools">Notes & Reports</Link>
-          <Link className="roadmap-link" to="/audit-roadmap">Audit & Reports Roadmap</Link>
+          <Link className="roadmap-link" to="/audit-roadmap">Audit Coverage</Link>
         </div>
         </div>
       </div>
       <div className="custom-card">
         <div className="flex-item cover">
-            <div className={`cover-placeholder-web ${t('home.cover_class')}`}></div>
+            <div className="workspace-preview-panel">
+              <div className="preview-topline">
+                <span>Workspace</span>
+                <strong>Live</strong>
+              </div>
+              <div className="preview-document">
+                <div className="preview-page preview-page-large"></div>
+                <div className="preview-page preview-page-small"></div>
+                <span className="preview-mark preview-mark-one"></span>
+                <span className="preview-mark preview-mark-two"></span>
+              </div>
+              <div className="preview-meta">
+                <span>3 reviewers</span>
+                <span>12 annotations</span>
+              </div>
+            </div>
         </div>
         <div className="flex-item card">
+          <div className="join-panel-heading">
+            <h2>Join a workspace</h2>
+            <span>Use the same workspace name to collaborate.</span>
+          </div>
           <div className="position-content flex-direction-column">
             <FormControl className={classes.formControl}>
               <FormInput Label={t('home.room_name')} value={session.roomName} onChange={

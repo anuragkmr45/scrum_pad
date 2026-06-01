@@ -19,12 +19,14 @@ import html2canvas from 'html2canvas';
 import CreateIcon from '@material-ui/icons/Create';
 import CreateOutlinedIcon from '@material-ui/icons/CreateOutlined';
 import { green } from '@material-ui/core/colors';
-import Button from '@material-ui/core/Button';
 import RecordRTCPromisesHandler from 'recordrtc';
-import { async } from 'rxjs/internal/scheduler/async';
 import GetAppIcon from '@material-ui/icons/GetApp';
 import StopIcon from '@material-ui/icons/Stop';
 import FiberManualRecordIcon from '@material-ui/icons/FiberManualRecord';
+import UndoIcon from '@material-ui/icons/Undo';
+import RedoIcon from '@material-ui/icons/Redo';
+import RotateRightIcon from '@material-ui/icons/RotateRight';
+import { undoAnnotations, redoAnnotations, getAnnotationHistoryState, addHistoryStateListener } from '../../utils/annotation-history';
 
 
 interface ControlItemProps {
@@ -65,6 +67,14 @@ interface ControlProps {
   role: string
   notice?: NoticeProps
   onClick: (evt: any, type: string) => void
+}
+
+type ExportOrientation = 'auto' | 'portrait' | 'landscape';
+
+type ExportCanvasOption = {
+  id: string
+  label: string
+  pageCount: number
 }
 export const toggleNext = (
   setCanvasNumber?: any,
@@ -211,6 +221,46 @@ export const toggleFirstLast = (
   }
 }
 
+function getExportCanvasOptions(): ExportCanvasOption[] {
+  const viewers = Array.from(
+    document.querySelectorAll('#main-container > .pdfViewer')
+  ) as HTMLElement[];
+
+  return viewers.map((viewer, index) => ({
+    id: viewer.id,
+    label: `Canvas ${index + 1}`,
+    pageCount: viewer.querySelectorAll('.page').length || 1,
+  }));
+}
+
+function rotateCanvas(source: HTMLCanvasElement, rotation: number) {
+  const normalizedRotation = ((rotation % 360) + 360) % 360;
+  if (normalizedRotation === 0) return source;
+
+  const output = document.createElement('canvas');
+  const swapSize = normalizedRotation === 90 || normalizedRotation === 270;
+  output.width = swapSize ? source.height : source.width;
+  output.height = swapSize ? source.width : source.height;
+
+  const context = output.getContext('2d');
+  if (!context) return source;
+
+  context.translate(output.width / 2, output.height / 2);
+  context.rotate((normalizedRotation * Math.PI) / 180);
+  context.drawImage(source, -source.width / 2, -source.height / 2);
+
+  return output;
+}
+
+function getPdfOrientation(
+  requestedOrientation: ExportOrientation,
+  canvas: HTMLCanvasElement
+) {
+  if (requestedOrientation === 'portrait') return 'p';
+  if (requestedOrientation === 'landscape') return 'l';
+  return canvas.width >= canvas.height ? 'l' : 'p';
+}
+
 export default function Control({
   onClick,
   role,
@@ -224,6 +274,13 @@ export default function Control({
   const [totalCanvas, setCanvasCount] = useState(1);
   // screen recording
   const [isRecording, setRecording] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportCanvases, setExportCanvases] = useState<ExportCanvasOption[]>([]);
+  const [selectedExportCanvasIds, setSelectedExportCanvasIds] = useState<string[]>([]);
+  const [exportOrientation, setExportOrientation] = useState<ExportOrientation>('auto');
+  const [exportRotation, setExportRotation] = useState<number>(0);
+  const [isExporting, setExporting] = useState(false);
+  const [historyState, setHistoryState] = useState(getAnnotationHistoryState());
   let recorder = useRef<any>();
   let desktopStream = useRef<any>();
   // to get current canvas number
@@ -239,6 +296,15 @@ export default function Control({
   }, [location.pathname, role]);
 
   const fileState = useContext(fileContext);
+
+  useEffect(() => {
+    const removeListener = addHistoryStateListener((event: any) => {
+      setHistoryState(event.detail || getAnnotationHistoryState());
+    });
+
+    setHistoryState(getAnnotationHistoryState());
+    return removeListener;
+  }, []);
 
   useEffect(() => {
 
@@ -286,38 +352,101 @@ export default function Control({
     }
   }
 
-  // download anntated canvas as single .pdf file
+  const syncAnnotationSnapshot = async (action: 'undo' | 'redo') => {
+    const result = action === 'undo' ? await undoAnnotations() : await redoAnnotations();
+
+    if (!result) {
+      globalStore.showToast({
+        type: 'notice-board',
+        message: action === 'undo' ? 'Nothing to undo' : 'Nothing to redo',
+      });
+      return;
+    }
+
+    sendToRemote(
+      result.annotations,
+      result.documentId,
+      'annotation-removed',
+      roomStore._state.me.uid
+    );
+  };
+
+  const openExportDialog = () => {
+    const canvases = getExportCanvasOptions();
+    setExportCanvases(canvases);
+    setSelectedExportCanvasIds(canvases.map((canvas) => canvas.id));
+    setExportOrientation('auto');
+    setExportRotation(0);
+    setExportDialogOpen(true);
+  };
+
+  const toggleExportCanvas = (canvasId: string) => {
+    setSelectedExportCanvasIds((current) => {
+      if (current.includes(canvasId)) {
+        return current.filter((id) => id !== canvasId);
+      }
+      return [...current, canvasId];
+    });
+  };
+
+  const toggleAllExportCanvases = () => {
+    if (selectedExportCanvasIds.length === exportCanvases.length) {
+      setSelectedExportCanvasIds([]);
+      return;
+    }
+    setSelectedExportCanvasIds(exportCanvases.map((canvas) => canvas.id));
+  };
+
+  // download annotated canvas as a configurable .pdf file
   const printDocument = async () => {
+    if (!selectedExportCanvasIds.length) {
+      globalStore.showToast({
+        type: 'notice-board',
+        message: 'Select at least one canvas to export',
+      });
+      return;
+    }
+
+    setExporting(true);
     try {
       await activediv('active');
 
       const viewers = Array.from(
         document.querySelectorAll('#main-container > .pdfViewer')
-      ) as HTMLElement[];
+      ).filter((viewer) => selectedExportCanvasIds.includes((viewer as HTMLElement).id)) as HTMLElement[];
 
       if (!viewers.length) {
         globalStore.showToast({
           type: 'notice-board',
-          message: 'No workspace pages to download',
+          message: 'No selected workspace pages to download',
         });
         return;
       }
 
-      const pdf = new jsPDF('l', 'mm', 'a0');
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
+      let pdf: any = null;
 
       for (let i = 0; i < viewers.length; i++) {
-        if (i > 0) {
-          pdf.addPage();
-        }
-
-        const canvas = await html2canvas(viewers[i], {
+        const sourceCanvas = await html2canvas(viewers[i], {
           backgroundColor: '#ffffff',
           useCORS: true,
         });
+        const canvas = rotateCanvas(sourceCanvas, exportRotation);
+        const pageOrientation = getPdfOrientation(exportOrientation, canvas);
+
+        if (!pdf) {
+          pdf = new jsPDF({
+            orientation: pageOrientation,
+            unit: 'mm',
+            format: 'a4',
+          });
+        } else {
+          pdf.addPage('a4', pageOrientation);
+        }
+
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
         const imgData = canvas.toDataURL('image/jpeg', 0.95);
-        const margin = 20;
+        const margin = 10;
         const availableWidth = pageWidth - margin * 2;
         const availableHeight = pageHeight - margin * 2;
         const scale = Math.min(availableWidth / canvas.width, availableHeight / canvas.height);
@@ -326,12 +455,13 @@ export default function Control({
         const x = (pageWidth - imageWidth) / 2;
         const y = (pageHeight - imageHeight) / 2;
 
-        pdf.addImage(imgData, 'JPEG', x, y, imageWidth, imageHeight);
+        pdf.addImage(imgData, 'JPEG', x, y, imageWidth, imageHeight, undefined, 'FAST');
       }
 
       const roomName = roomStore._state.course.roomName || 'workspace';
       const fileName = roomName.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'workspace';
       pdf.save(`${fileName}-annotated.pdf`);
+      setExportDialogOpen(false);
     } catch (err) {
       globalStore.showToast({
         type: 'notice-board',
@@ -339,6 +469,7 @@ export default function Control({
       });
     } finally {
       await activediv('deactive');
+      setExporting(false);
     }
   }
 
@@ -494,6 +625,18 @@ export default function Control({
           <div className="controls">
             {canManageCanvas ?
               <>
+                <div className={`control-button history-control ${historyState.canUndo ? '' : 'disabled'}`}>
+                  <UndoIcon onClick={() => historyState.canUndo && syncAnnotationSnapshot('undo')} />
+                  <span className="tooltiptext">Undo</span>
+                </div>
+
+                <div className={`control-button history-control ${historyState.canRedo ? '' : 'disabled'}`}>
+                  <RedoIcon onClick={() => historyState.canRedo && syncAnnotationSnapshot('redo')} />
+                  <span className="tooltiptext">Redo</span>
+                </div>
+
+                <div className="menu-split" style={{ marginLeft: '7px', marginRight: '7px' }}></div>
+
                 <div className="control-button">
                   <FirstPageIcon onClick={() => toggleFirstLast('first', setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages)}>
                   </FirstPageIcon>
@@ -537,8 +680,8 @@ export default function Control({
                     </div> : null
                 }
                 <div className='control-button'>
-                  <GetAppIcon onClick={printDocument} />
-                  <span className="tooltiptext">Download canvas</span>
+                  <GetAppIcon onClick={openExportDialog} />
+                  <span className="tooltiptext">Export annotated PDF</span>
                 </div>
                 <div className="menu-split" style={{ marginLeft: '7px', marginRight: '7px' }}></div>
               </> : null
@@ -611,6 +754,90 @@ export default function Control({
         tool={handlePollTool}
         endPoll={endPoll}
       />
+      {exportDialogOpen ?
+        <div className="export-modal-backdrop" role="presentation">
+          <div className="export-modal-panel" role="dialog" aria-modal="true" aria-labelledby="exportPdfTitle">
+            <div className="export-modal-header">
+              <div>
+                <span>Export</span>
+                <h2 id="exportPdfTitle">Annotated PDF</h2>
+              </div>
+              <button type="button" onClick={() => setExportDialogOpen(false)} disabled={isExporting}>Close</button>
+            </div>
+
+            <div className="export-modal-section">
+              <div className="export-section-title">
+                <strong>Canvas pages</strong>
+                <button type="button" onClick={toggleAllExportCanvases} disabled={isExporting}>
+                  {selectedExportCanvasIds.length === exportCanvases.length ? 'Clear all' : 'Select all'}
+                </button>
+              </div>
+              <div className="export-canvas-list">
+                {exportCanvases.map((canvas) => (
+                  <label key={canvas.id} className="export-canvas-row">
+                    <input
+                      type="checkbox"
+                      checked={selectedExportCanvasIds.includes(canvas.id)}
+                      disabled={isExporting}
+                      onChange={() => toggleExportCanvas(canvas.id)}
+                    />
+                    <span>
+                      <strong>{canvas.label}</strong>
+                      <small>{canvas.pageCount} document page{canvas.pageCount === 1 ? '' : 's'}</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="export-modal-section">
+              <strong>Page direction</strong>
+              <div className="export-segmented">
+                {(['auto', 'portrait', 'landscape'] as ExportOrientation[]).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={exportOrientation === option ? 'active' : ''}
+                    disabled={isExporting}
+                    onClick={() => setExportOrientation(option)}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="export-modal-section">
+              <strong>Rotate export</strong>
+              <div className="export-rotation-grid">
+                {[0, 90, 180, 270].map((rotation) => (
+                  <button
+                    key={rotation}
+                    type="button"
+                    className={exportRotation === rotation ? 'active' : ''}
+                    disabled={isExporting}
+                    onClick={() => setExportRotation(rotation)}
+                  >
+                    <RotateRightIcon />
+                    {rotation}°
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="export-modal-footer">
+              <span>{selectedExportCanvasIds.length} selected</span>
+              <button
+                type="button"
+                className="primary"
+                disabled={isExporting || !selectedExportCanvasIds.length}
+                onClick={printDocument}
+              >
+                {isExporting ? 'Exporting...' : 'Download PDF'}
+              </button>
+            </div>
+          </div>
+        </div> : null}
     </>
   )
 };

@@ -130,13 +130,14 @@ function scalePage(pageNumber, viewport, context, count) {
 	canvas.height = roundToDivide(viewport.height * outputScale.sy, sfy[0]);
 	canvas.style.width = roundToDivide(viewport.width, sfx[1]) + 'px';
 	canvas.style.height = roundToDivide(viewport.height, sfx[1]) + 'px';
-	//svg.setAttribute('width', viewport.width);
-	svg.setAttribute('width', '100%');
+	svg.setAttribute('width', viewport.width);
 	svg.setAttribute('height', viewport.height);
-	//svg.style.width = `${viewport.width}px`;
+	svg.style.width = `${viewport.width}px`;
 	svg.style.height = `${viewport.height}px`;
 	page.style.width = `${viewport.width}px`;
 	page.style.height = `${viewport.height}px`;
+	page.setAttribute('data-pdf-width', `${viewport.width}`);
+	page.setAttribute('data-pdf-height', `${viewport.height}`);
 	wrapper.style.width = `${viewport.width}px`;
 	wrapper.style.height = `${viewport.height}px`;
 	textLayer.style.width = `${viewport.width}px`;

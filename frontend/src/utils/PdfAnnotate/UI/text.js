@@ -17,6 +17,7 @@ let input;
 let _textSize;
 let _textColor;
 let _tickSize;
+let _textMode = 'text';
 let _orgTextSize;
 let _orgTextColor;
 let _orgTickSize;
@@ -72,11 +73,17 @@ function handleDocumentMouseup(e) {
   const setTextBox = () => {
     input = document.createElement('textarea');
     input.setAttribute('id', 'pdf-annotate-text-input');
-    input.setAttribute('placeholder', 'Enter text');
-    input.style.borderWidth = 0;
-    input.style.padding = '0 5px';
-    input.style.borderBottom = `2px solid ${BORDER_COLOR}`;
-    input.style.borderRadius = '3px';
+    input.setAttribute('placeholder', _textMode === 'note' ? 'Add note' : 'Enter text');
+    input.setAttribute('class', _textMode === 'note' ? 'pdf-annotate-note-input' : 'pdf-annotate-text-input');
+    input.style.borderWidth = _textMode === 'note' ? '1px' : 0;
+    input.style.borderStyle = 'solid';
+    input.style.borderColor = _textMode === 'note' ? 'rgba(235, 94, 40, 0.38)' : 'transparent';
+    input.style.padding = _textMode === 'note' ? '10px 12px' : '0 5px';
+    input.style.borderBottom = _textMode === 'note' ? '1px solid rgba(235, 94, 40, 0.38)' : `2px solid ${BORDER_COLOR}`;
+    input.style.borderRadius = _textMode === 'note' ? '10px' : '3px';
+    input.style.background = _textMode === 'note' ? 'rgba(255, 252, 242, 0.92)' : '#ffffff';
+    input.style.boxShadow = _textMode === 'note' ? '0 16px 42px rgba(37, 36, 34, 0.16)' : 'none';
+    input.style.backdropFilter = _textMode === 'note' ? 'blur(18px)' : 'none';
     input.style.position = 'absolute';
     input.style.outline = '1px solid transparent';
     clientY = e.clientY;
@@ -217,6 +224,7 @@ function saveText(hasClose = true) {
   if (input.value.trim().length > 0) {
     let annotation = Object.assign({
       type: 'textbox',
+      mode: _textMode,
       size: _textSize,
       color: _textColor,
       tick: _tickSize,
@@ -308,10 +316,11 @@ export function closeInput() {
  * @param {Number} textSize The size of the text
  * @param {String} textColor The color of the text
  */
-export function setText(textSize = 12, textColor = '000000', tickSize = 0) {
+export function setText(textSize = 12, textColor = '000000', tickSize = 0, textMode = 'text') {
   _textSize = parseInt(18);
   _textColor = textColor;
   _tickSize = tickSize;
+  _textMode = textMode;
 }
 
 
@@ -351,4 +360,3 @@ export function disableText() {
   }
   enableUserSelect();
 }
-

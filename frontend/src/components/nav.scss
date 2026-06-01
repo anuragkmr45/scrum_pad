@@ -1,55 +1,87 @@
 
 .nav-container {
-  padding: 0 10px;
-  height: 48px;
+  padding: 0 14px;
+  height: 52px;
   box-sizing: border-box;
   display: flex;
   justify-content: space-between;
-  background-color: #F5F7F8;
+  align-items: center;
+  background-color: #252422;
+  border-bottom: 1px solid rgba(255, 252, 242, 0.12);
+  box-shadow: 0 8px 24px rgba(37, 36, 34, 0.18);
+
+  .class-title {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .room-name {
+    display: inline-block;
+    max-width: 34vw;
+    overflow: hidden;
+    color: #fffcf2;
+    font-size: 14px;
+    font-weight: 750;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .MuiButtonBase-root.nav-button {
     box-shadow: none;
   }
+
   .MuiButtonBase-root.nav-button.start {
     line-height: 15px;
     margin-left: 8px;
     text-transform: none;
-    width: 103px;
-    height: 28px;
+    width: 118px;
+    height: 30px;
     border-radius: 14px;
-    background: #44A2FC;
+    background: #eb5e28;
     box-sizing: border-box;
+
     .MuiButton-label {
       font-size: 14px;
       line-height: 15px;
+      white-space: nowrap;
+      color: #fffcf2;
     }
+
     &:hover {
-      background: #82C2FF;
+      background: #c94d21;
     }
   }
+
   .MuiButtonBase-root.nav-button.stop {
     line-height: 15px;
     margin-left: 8px;
     text-transform: none;
-    width: 103px;
-    height: 28px;
-    background: #FFFFFF;
-    color: #FF2D55;
-    border: 1px solid #FF2D55;
+    width: 118px;
+    height: 30px;
+    background: transparent;
+    color: #fffcf2;
+    border: 1px solid rgba(235, 94, 40, 0.82);
     border-radius: 14px;
+
     .MuiButton-label {
       font-size: 14px;
       line-height: 15px;
+      white-space: nowrap;
     }
+
     &:hover {
-      border: 1px solid #FF5E7D;
+      border: 1px solid #eb5e28;
       border-radius: 14px;
-      color: #FF5E7D;
+      color: #eb5e28;
     }
   }
   
   .network-state {
-    padding: 16px 0;
+    padding: 0;
   }
+
   .menu {
     position: relative;
     z-index: 3;
@@ -79,8 +111,13 @@
   align-items: center;
   max-width: 78px;
   min-width: 78px;
+
+  .icon-time {
+    color: #ccc5b9;
+  }
+
   .time {
-    color: #333333;
+    color: #fffcf2;
     font-size: 12px;
     margin-left: 5px;
     line-height: 14px;
@@ -89,20 +126,42 @@
 
 .network-state {
   display: flex;
+  align-items: center;
+
   .net-field {
-    color: #333;
+    color: rgba(255, 252, 242, 0.76);
     font-size: 12px;
     line-height: 17px;
     margin-right: 10px;
   }
+
   .net-field-container {
     display: inline-flex;
     justify-content: center;
     align-items: center;
   }
+
   .net-field-value {
-    color: #44A2FC;
+    color: #eb5e28;
     font-size: 12px;
     line-height: 15px;
+  }
+}
+
+.menu-split {
+  background: rgba(255, 252, 242, 0.18);
+}
+
+@media screen and (max-width: 900px) {
+  .nav-container {
+    padding: 0 10px;
+
+    .room-name {
+      max-width: 30vw;
+    }
+
+    .network-state .net-field:first-child {
+      display: none;
+    }
   }
 }

@@ -92,7 +92,7 @@ const en = {
     'room_join': 'Join',
     'short_title': {
       'title': 'HexScrum Workspace',
-      'subtitle': 'Document Workspace',
+      'subtitle': 'Document Review Suite',
     },
     'name_too_long': 'name too long, should <= 20 characters',
     '1v1': 'Live Workspace',

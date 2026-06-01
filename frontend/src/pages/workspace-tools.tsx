@@ -128,12 +128,19 @@ function WorkspaceTools() {
 
   const historyColumns = ['timestamp', 'userName', 'userDesignation', 'action', 'toolType', 'pageNumber', 'annotationId', 'documentId'];
   const userColumns = ['userName', 'designation', 'total', 'byAction', 'byTool', 'byPage'];
+  const summary = [
+    { label: 'Meeting notes', value: notes.length },
+    { label: 'Annotation events', value: history.length },
+    { label: 'Contributors', value: userReport.length },
+    { label: 'Archive', value: archive ? 'Ready' : 'Pending' },
+  ];
 
   return (
     <div className="workspace-tools-page">
       <header className="workspace-tools-header">
         <div>
-          <h1>Notes & Reports</h1>
+          <span className="eyebrow">Audit & export center</span>
+          <h1>Workspace documentation</h1>
           <span>{profile.name || 'Local User'} {profile.designation ? `- ${profile.designation}` : ''}</span>
         </div>
         <Link to="/">Back</Link>
@@ -145,6 +152,23 @@ function WorkspaceTools() {
       <section className="workspace-tools-section">
         <label htmlFor="workspaceId">Workspace ID</label>
         <input id="workspaceId" value={workspaceId} onChange={(evt: any) => rememberWorkspace(evt.target.value)} />
+      </section>
+
+      <section className="workspace-summary-grid" aria-label="Workspace summary">
+        {summary.map(item => (
+          <article key={item.label}>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+          </article>
+        ))}
+      </section>
+
+      <section className="workspace-feature-strip" aria-label="Available exports">
+        <span>User-wise ownership</span>
+        <span>Name and designation tags</span>
+        <span>Timestamps</span>
+        <span>Annotation history</span>
+        <span>Meeting archive</span>
       </section>
 
       <section className="workspace-tools-section">

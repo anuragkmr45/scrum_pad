@@ -1,6 +1,7 @@
 import uuid from '../utils/uuid';
 import StoreAdapter from './StoreAdapter';
 import { fireEvent, addEventListener, removeEventListener } from '../UI/event';
+import { recordAnnotationChange } from '../../annotation-history';
 
 // StoreAdapter for working with localStorage
 // This is ideal for testing, examples, and prototyping
@@ -27,6 +28,7 @@ export default class LocalStoreAdapter extends StoreAdapter {
 
       addAnnotation(documentId, pageNumber, annotation) {
         return new Promise((resolve, reject) => {
+          const beforeAnnotations = getAnnotations(documentId);
           annotation.class = 'Annotation';
           if (!annotation.uuid) {
             annotation.uuid = uuid();
@@ -36,6 +38,7 @@ export default class LocalStoreAdapter extends StoreAdapter {
           let annotations = getAnnotations(documentId);
           annotations.push(annotation);
           updateAnnotations(documentId, annotations);
+          recordAnnotationChange(documentId, beforeAnnotations, annotations);
           fireEvent('annotation:added', documentId, annotation);
           resolve(annotation);
         });
@@ -43,11 +46,13 @@ export default class LocalStoreAdapter extends StoreAdapter {
 
       editAnnotation(documentId, annotationId, annotation) {
         return new Promise((resolve, reject) => {
+          const beforeAnnotations = getAnnotations(documentId);
           let annotations = getAnnotations(documentId);
           var annotationIndex = findAnnotation(documentId, annotationId);
           if (annotationIndex > -1) {
             annotations[annotationIndex] = annotation;
             updateAnnotations(documentId, annotations);
+            recordAnnotationChange(documentId, beforeAnnotations, annotations);
           }
           fireEvent('annotation:updated', documentId, annotationId, annotation);
           resolve(annotation);
@@ -58,9 +63,11 @@ export default class LocalStoreAdapter extends StoreAdapter {
         return new Promise((resolve, reject) => {
           let index = findAnnotation(documentId, annotationId);
           if (index > -1) {
+            const beforeAnnotations = getAnnotations(documentId);
             let annotations = getAnnotations(documentId);
             annotations.splice(index, 1);
             updateAnnotations(documentId, annotations);
+            recordAnnotationChange(documentId, beforeAnnotations, annotations);
           }
           fireEvent('annotation:removed', documentId, annotationId);
           resolve(true);
@@ -142,7 +149,11 @@ export default class LocalStoreAdapter extends StoreAdapter {
 
   resetAnnotation(documentId, slient = false) {
     return new Promise((resolve, reject) => {
+      const beforeAnnotations = getAnnotations(documentId);
       updateAnnotations(documentId, []);
+      if (!slient) {
+        recordAnnotationChange(documentId, beforeAnnotations, []);
+      }
       if (!slient) {
         fireEvent('annotation:reset', documentId);
       }

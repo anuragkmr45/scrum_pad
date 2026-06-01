@@ -2,31 +2,53 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 
 export default function AuditRoadmap() {
-  document.title = 'Audit & Reports Roadmap - HexScrum Workspace';
+  document.title = 'Audit Coverage - HexScrum Workspace';
+
+  const coverage = [
+    {
+      title: 'Annotation tracking',
+      body: 'Each tracked annotation event includes workspace, document page, action, author name, designation, color, and timestamp for reviewer-level ownership.',
+    },
+    {
+      title: 'Contributor reports',
+      body: 'Workspace tools summarize user-wise contribution counts and export CSV reports for lead review follow-up.',
+    },
+    {
+      title: 'Meeting documentation',
+      body: 'Leads can save meeting notes, export annotation history, and generate an archive manifest for the workspace.',
+    },
+    {
+      title: 'Annotated PDF export',
+      body: 'The live canvas can export the marked-up document pages as a PDF from the workspace controls.',
+    },
+  ];
 
   return (
     <main className="audit-roadmap-page">
       <section className="audit-roadmap-content">
         <Link className="roadmap-link" to="/">Back to workspace</Link>
-        <h1>Audit & Reports Roadmap</h1>
+        <span className="eyebrow">MVP audit coverage</span>
+        <h1>Track every reviewer contribution without slowing the room.</h1>
         <p>
-          HexScrum Workspace currently provides a whiteboard MVP. Enterprise audit, user-wise
-          reporting, meeting archives, and export history require a dedicated backend schema and
-          event pipeline before they should be treated as production-ready.
+          HexScrum Workspace now exposes the bare minimum review documentation paths needed for
+          live document collaboration: ownership tags, timestamps, annotation history, user-wise
+          reports, notes, archives, and annotated PDF export. This is MVP coverage and should not be
+          treated as enterprise compliance or load-tested reporting.
         </p>
         <div className="audit-roadmap-grid">
-          <article>
-            <h2>MVP Now</h2>
-            <p>Live workspace, document canvas, annotations, participant presence, and PDF export path from the upstream SDK.</p>
-          </article>
-          <article>
-            <h2>Next Build</h2>
-            <p>Persist users, workspaces, documents, pages, annotation events, meeting notes, and exports.</p>
-          </article>
-          <article>
-            <h2>Production Gate</h2>
-            <p>Add authorization, retention policy, report generation, audit review, and load testing before enterprise rollout.</p>
-          </article>
+          {coverage.map((item) => (
+            <article key={item.title}>
+              <h2>{item.title}</h2>
+              <p>{item.body}</p>
+            </article>
+          ))}
+        </div>
+        <div className="audit-roadmap-note">
+          <strong>Production gate:</strong>
+          <span>
+            Add authorization, retention policy, signed export records, report review workflow, and
+            load testing before making enterprise audit claims.
+          </span>
         </div>
       </section>
     </main>

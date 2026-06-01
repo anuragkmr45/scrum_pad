@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useContext } from "react";
+import React, { useEffect, useState, useContext, useRef } from "react";
 import { getDocument } from "pdfjs-dist/build/pdf";
 import PDFJSAnnotate from "../utils/PdfAnnotate/PDFJSAnnotate";
 import 'pdfjs-dist/web/pdf_viewer.css';
@@ -9,6 +9,7 @@ import { toggleNext, togglePrev, toggleFirstLast } from "./whiteboard/control";
 import FullScreen from './fullscreen/index';
 import { t } from '../i18n';
 import { getHexscrumProfile, getWorkspaceId, postAnnotationEvent } from '../utils/hexscrum-api';
+import { addSnapshotAppliedListener } from '../utils/annotation-history';
 
 (typeof window !== "undefined"
   ? window
@@ -79,7 +80,11 @@ const trackAnnotationEvent = (action, documentId, annotation, annotationId, befo
 };
 
 const Whiteboard = () => {
-  let arrayStoreAdapter = new PDFJSAnnotate.ArrayStoreAdapter();
+  const arrayStoreAdapterRef = useRef(null);
+  if (!arrayStoreAdapterRef.current) {
+    arrayStoreAdapterRef.current = new PDFJSAnnotate.ArrayStoreAdapter();
+  }
+  let arrayStoreAdapter = arrayStoreAdapterRef.current;
 
   const fileState = useContext(fileContext);
 
@@ -216,6 +221,18 @@ const Whiteboard = () => {
         }
       );
   }, []);
+
+  useEffect(() => {
+    return addSnapshotAppliedListener((event) => {
+      const detail = event.detail || {};
+      if (!detail.documentId) return;
+
+      arrayStoreAdapter
+        .resetAnnotation(detail.documentId)
+        .then(() => arrayStoreAdapter.setAnnotations(detail.documentId, detail.annotations || []))
+        .catch(() => {});
+    });
+  }, [arrayStoreAdapter]);
 
   useEffect(() => {
 

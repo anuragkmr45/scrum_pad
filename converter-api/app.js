@@ -353,6 +353,16 @@ async function convertOfficeToPdf(inputPath, outputPath) {
 function convertImageToPdf(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ autoFirstPage: false });
+    let image;
+    try {
+      image = doc.openImage(inputPath);
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    const padding = 36;
+    const pageWidth = image.width + padding * 2;
+    const pageHeight = image.height + padding * 2;
     const stream = fs.createWriteStream(outputPath);
 
     stream.on("finish", resolve);
@@ -360,11 +370,10 @@ function convertImageToPdf(inputPath, outputPath) {
     doc.on("error", reject);
 
     doc.pipe(stream);
-    doc.addPage({ size: "A4", margin: 36 });
-    doc.image(inputPath, 36, 36, {
-      fit: [doc.page.width - 72, doc.page.height - 72],
-      align: "center",
-      valign: "center"
+    doc.addPage({ size: [pageWidth, pageHeight], margin: 0 });
+    doc.image(inputPath, padding, padding, {
+      width: image.width,
+      height: image.height
     });
     doc.end();
   });

@@ -8,6 +8,7 @@ import ColorizeIcon from '@material-ui/icons/Colorize';
 import CropDinIcon from '@material-ui/icons/CropDin';
 import RadioButtonUncheckedIcon from '@material-ui/icons/RadioButtonUnchecked';
 import TextFieldsIcon from '@material-ui/icons/TextFields';
+import NoteAddIcon from '@material-ui/icons/NoteAdd';
 import DeleteIcon from '@material-ui/icons/Delete';
 import FormatColorTextIcon from '@material-ui/icons/FormatColorText';
 import PublishIcon from '@material-ui/icons/Publish';
@@ -17,14 +18,13 @@ import LineWeightIcon from '@material-ui/icons/LineWeight';
 import PersonIcon from '@material-ui/icons/Person';
 import { roomStore } from '../../stores/room';
 import { useLocation } from 'react-router';
-import { blue } from '@material-ui/core/colors';
 import { getHexscrumProfile, getWorkspaceId } from '../../utils/hexscrum-api';
 
 const Toolelements = () => {
   const [isPdf, showHighLight] = useState(false);
   let [tooltype, setToolType] = useState('cursor');
   let [thickness, changeThickness] = useState(1);
-  let [color, changeColor] = useState('#ff0000');
+  let [color, changeColor] = useState('#EB5E28');
   let [colorPicker, setColorPicker] = useState(false);
   let [sizePicker, setSizePicker] = useState(false);
 
@@ -51,7 +51,7 @@ const Toolelements = () => {
     localStorage.setItem(RENDER_OPTIONS.documentId + '/pen/size', thickness);
 
     // set for Text
-    UI.setText(thickness, color);
+    UI.setText(thickness, color, 0, tooltype === 'note' ? 'note' : 'text');
     localStorage.setItem(RENDER_OPTIONS.documentId + '/text/size', thickness);
     localStorage.setItem(RENDER_OPTIONS.documentId + '/text/color', color);
 
@@ -70,7 +70,7 @@ const Toolelements = () => {
     localStorage.setItem(RENDER_OPTIONS.documentId + '/rect/size', thickness);
     localStorage.setItem(RENDER_OPTIONS.documentId + '/rect/color', color);
 
-  },[color, thickness]);
+  },[color, thickness, tooltype]);
 
 
   useEffect(() => {
@@ -91,6 +91,12 @@ const Toolelements = () => {
           break;
         case 'text':
           UI.disableEdit();
+          UI.setText(thickness, color, 0, 'text');
+          UI.enableText();
+          break;
+        case 'note':
+          UI.disableEdit();
+          UI.setText(thickness, color, 0, 'note');
           UI.enableText();
           break;
         case 'line':
@@ -144,6 +150,7 @@ const Toolelements = () => {
               UI.disableEraser();
               break;
             case 'text':
+            case 'note':
               UI.disableText();
               break;
             case 'line':
@@ -421,6 +428,14 @@ const Toolelements = () => {
               <span className="tooltiptext">Text</span>
           </div>
           <div className="menu-mat-icons">
+              <NoteAddIcon
+               data-annotation-type="note"
+               className= { tooltype === 'note' ? 'icon items active' : 'icon items'}
+               onClick = {handleToolbarClick}
+              />
+              <span className="tooltiptext">Note</span>
+          </div>
+          <div className="menu-mat-icons">
               <i
                 data-annotation-type="eraser"
                 className= { tooltype === 'eraser' ? 'icon items eraser active' : 'icon items eraser'}
@@ -472,7 +487,7 @@ const Toolelements = () => {
           {
             showTool ?
             <>
-            <PersonIcon style={{ color: blue[300] }} onClick = {ExitGrantWhiteboard} className = 'icon items' />
+            <PersonIcon style={{ color: '#EB5E28' }} onClick = {ExitGrantWhiteboard} className = 'icon items' />
             <span className="tooltiptext">cancel annotation</span>
             </>
             : null

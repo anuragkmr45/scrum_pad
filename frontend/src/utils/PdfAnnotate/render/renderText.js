@@ -12,8 +12,8 @@ export default function renderText(a) {
   var text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
 
   setAttributes(text, {
-    x: a.x,
-    y: a.y + parseInt(a.size, 10),
+    x: a.mode === 'note' ? a.x + 8 : a.x,
+    y: a.y + parseInt(a.size, 10) + (a.mode === 'note' ? 8 : 0),
     dy: 0,
     width: a.width,
     height: a.height,
@@ -26,10 +26,34 @@ export default function renderText(a) {
   let lines = content.split("\n");
   lines.forEach(function (value, index) {
     value = value ? value : " ";
-    htmlContent = htmlContent + '<tspan x="' + a.x + '"  dy="' + (index ? (parseInt(a.size, 10) + 5) : 0) + 'px" xml:space="preserve">' + value + '</tspan>';
+    htmlContent = htmlContent + '<tspan x="' + (a.mode === 'note' ? a.x + 8 : a.x) + '"  dy="' + (index ? (parseInt(a.size, 10) + 5) : 0) + 'px" xml:space="preserve">' + value + '</tspan>';
   });
 
   text.innerHTML = htmlContent;
+
+  if (a.mode === 'note') {
+    var group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    var rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    var width = Math.max(parseFloat(a.width || 0), 136);
+    var height = Math.max(parseFloat(a.height || 0), 46);
+
+    setAttributes(rect, {
+      x: a.x - 6,
+      y: a.y - 4,
+      width: width + 18,
+      height: height + 18,
+      rx: 10,
+      ry: 10,
+      fill: '#fffcf2',
+      stroke: '#eb5e28',
+      strokeWidth: 1.25,
+      opacity: 0.96
+    });
+
+    group.appendChild(rect);
+    group.appendChild(text);
+    return group;
+  }
 
   return text;
 }
