@@ -79,6 +79,18 @@ function hashPassword(password, salt) {
   return crypto.pbkdf2Sync(String(password), salt, 120000, 32, "sha256").toString("hex");
 }
 
+function passwordCredentials(password) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  return {
+    password_hash: hashPassword(password, salt),
+    password_salt: salt
+  };
+}
+
+function hasPasswordCredentials(user) {
+  return Boolean(user && user.password_hash && user.password_salt);
+}
+
 function verifyPassword(password, salt, hash) {
   if (!salt || !hash) return false;
   const expected = hashPassword(password, salt);
@@ -613,6 +625,51 @@ async function findUserByEmail(email) {
   return result.rows[0] || null;
 }
 
+async function completePasswordlessUser(existing, body, password) {
+  const email = normalizeEmail(body.email || existing.email);
+  const credentials = passwordCredentials(password);
+  const completedUser = {
+    ...existing,
+    name: body.name || existing.name || email.split("@")[0],
+    email,
+    designation: body.designation || existing.designation || "",
+    color: normalizeColor(body.color) || existing.color || memberColors[0],
+    password_hash: credentials.password_hash,
+    password_salt: credentials.password_salt,
+    updated_at: nowIso()
+  };
+
+  if (!pool) {
+    Object.assign(existing, completedUser);
+    await acceptPendingInvites(existing);
+    return serializeUser(existing);
+  }
+
+  const result = await query(
+    `UPDATE users
+     SET name = $2,
+         email = $3,
+         designation = $4,
+         color = $5,
+         password_hash = $6,
+         password_salt = $7,
+         updated_at = now()
+     WHERE id = $1
+     RETURNING *`,
+    [
+      existing.id,
+      completedUser.name,
+      completedUser.email,
+      completedUser.designation,
+      completedUser.color,
+      completedUser.password_hash,
+      completedUser.password_salt
+    ]
+  );
+  await acceptPendingInvites(result.rows[0]);
+  return serializeUser(result.rows[0]);
+}
+
 async function createAuthUser(body) {
   const email = normalizeEmail(body.email);
   const password = String(body.password || "");
@@ -628,20 +685,24 @@ async function createAuthUser(body) {
   }
   const existing = await findUserByEmail(email);
   if (existing) {
+    if (!hasPasswordCredentials(existing)) {
+      return completePasswordlessUser(existing, body, password);
+    }
+
     const err = new Error("email_already_registered");
     err.statusCode = 409;
     throw err;
   }
 
-  const salt = crypto.randomBytes(16).toString("hex");
+  const credentials = passwordCredentials(password);
   const user = {
     id: body.id || makeId("usr"),
     name: body.name || email.split("@")[0],
     email,
     designation: body.designation || "",
     color: normalizeColor(body.color) || memberColors[0],
-    password_hash: hashPassword(password, salt),
-    password_salt: salt,
+    password_hash: credentials.password_hash,
+    password_salt: credentials.password_salt,
     created_at: nowIso(),
     updated_at: nowIso()
   };
@@ -664,7 +725,20 @@ async function createAuthUser(body) {
 
 async function authenticateUser(email, password) {
   const user = await findUserByEmail(email);
-  if (!user || !verifyPassword(password, user.password_salt, user.password_hash)) {
+  if (!user) {
+    const err = new Error("invalid_credentials");
+    err.statusCode = 401;
+    throw err;
+  }
+  if (!hasPasswordCredentials(user)) {
+    if (String(password || "").length < 6) {
+      const err = new Error("weak_password");
+      err.statusCode = 400;
+      throw err;
+    }
+    return completePasswordlessUser(user, { email }, password);
+  }
+  if (!verifyPassword(password, user.password_salt, user.password_hash)) {
     const err = new Error("invalid_credentials");
     err.statusCode = 401;
     throw err;

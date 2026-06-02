@@ -969,6 +969,7 @@ app.use(function(err, req, res, next) {
     invalid_email: "Enter a valid email address.",
     weak_password: "Password must be at least 6 characters.",
     email_already_registered: "This email is already registered.",
+    account_password_not_set: "This account exists but has no password yet. Use Create account once with this email to set the password.",
     invalid_credentials: "Email or password is incorrect.",
     workspace_and_email_required: "Workspace and email are required."
   };
