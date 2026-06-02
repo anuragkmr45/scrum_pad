@@ -457,12 +457,13 @@
     display: flex;
     flex-direction: column;
     width: 48px;
+    max-height: calc(100vh - 136px);
     min-height: 46px;
     border-radius: 6px;
     background-color: rgba(37, 36, 34, 0.86);
-    justify-content: center;
+    justify-content: flex-start;
     align-items: center;
-    z-index: 3;
+    z-index: 28;
     margin-left: 15px;
     pointer-events: all;
 
@@ -713,27 +714,54 @@ div.media-board{
 position: fixed;
 top:50%;
 transform:translateY(-50%) ;
-z-index: 3;
+z-index: 28;
 left: 12px;
 max-height: calc(100vh - 136px);
-overflow-y: auto;
+overflow: visible;
 padding: 4px;
 scrollbar-width: thin;
 }
 
-.menu .icon.items.upload > input{
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  opacity: 0;
+.toolbar-primary-action {
+  pointer-events: auto;
+  position: relative;
   width: 38px;
   height: 38px;
-  font-size: 0;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 2px;
+  border: 1px solid rgba(255, 252, 242, 0.18);
+  border-radius: 6px;
+  background: #eb5e28;
+  color: #fffcf2;
   cursor: pointer;
+  box-sizing: border-box;
+
+  svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  &:hover {
+    background: #c94d21;
+  }
 }
-.menu .icon.items.upload{
-  position: relative;
+
+.toolbar-primary-action:hover .tooltiptext {
+  visibility: visible;
+  opacity: 1;
+}
+
+.toolbar-file-input {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 div#add_page,
 div#remove_page
@@ -829,9 +857,11 @@ div#remove_page:after{
   animation: glassPanelIn 180ms ease-out;
 }
 .media-board .menu .annotation-toolbar {
-  max-height: calc(100vh - 166px);
+  max-height: calc(100vh - 212px);
   overflow-y: auto;
   overflow-x: visible;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   animation: glassPanelIn 180ms ease-out;
 }
@@ -1806,6 +1836,14 @@ div#remove_page:after{
     max-height: calc(100vh - 176px);
   }
 
+  .media-board .menu {
+    max-height: calc(100vh - 176px);
+  }
+
+  .media-board .menu .annotation-toolbar {
+    max-height: calc(100vh - 246px);
+  }
+
   .participant-control-panel,
   .share-control-panel {
     bottom: 78px;
@@ -1828,5 +1866,13 @@ div#remove_page:after{
   .media-board .layer {
     left: 10px;
     max-height: calc(100vh - 154px);
+  }
+
+  .media-board .menu {
+    max-height: calc(100vh - 154px);
+  }
+
+  .media-board .menu .annotation-toolbar {
+    max-height: calc(100vh - 224px);
   }
 }

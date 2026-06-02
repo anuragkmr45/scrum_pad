@@ -341,6 +341,10 @@ const Toolelements = () => {
       alert("Only the lead reviewer can upload documents.");
       return;
     }
+    if (!inputFileRef.current) {
+      alert("Upload control is not ready yet. Please try again.");
+      return;
+    }
     /*Collecting node-element and performing click*/
     inputFileRef.current.click();
   }
@@ -364,6 +368,16 @@ const Toolelements = () => {
         >
           {toolbarCollapsed ? <KeyboardArrowRightIcon /> : <KeyboardArrowLeftIcon />}
         </button>
+        {!toolbarCollapsed && canManageWorkspace ?
+          <button
+            type="button"
+            className="toolbar-primary-action toolbar-upload-action"
+            onClick={handleFileUpload}
+            aria-label="Upload document"
+          >
+            <PublishIcon />
+            <span className="tooltiptext">Upload document</span>
+          </button> : null}
         {!toolbarCollapsed ? <div className="nav annotation-toolbar">
         <div className="menu-mat-icons">
             <NearMeIcon
@@ -505,20 +519,6 @@ const Toolelements = () => {
            <span className="tooltiptext">Highlight Text</span>
           </>
           }
-          {canManageWorkspace ?
-          <div className="menu-mat-icons">
-              <PublishIcon onClick = {handleFileUpload} className="icon items upload"
-               />
-               <span className="tooltiptext">Upload</span>
-            <input
-            type="file"
-            id="fileUpload"
-            ref={inputFileRef}
-            onChange={handleUpload}
-            accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,.odt,.odp,.ods,.png,.jpg,.jpeg"
-            style={{display: 'none'}}
-            />
-          </div> : null}
           {
             showTool ?
             <>
@@ -529,6 +529,17 @@ const Toolelements = () => {
           }
         </div> : null}
       </div>
+      {canManageWorkspace ?
+        <input
+          type="file"
+          id="fileUpload"
+          ref={inputFileRef}
+          onChange={handleUpload}
+          accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,.odt,.odp,.ods,.png,.jpg,.jpeg"
+          className="toolbar-file-input"
+          tabIndex={-1}
+          aria-hidden="true"
+        /> : null}
       {clearModalOpen ?
         <div className="clear-modal-backdrop" role="presentation">
           <div className="clear-modal-panel" role="dialog" aria-modal="true" aria-labelledby="clearAnnotationsTitle">
