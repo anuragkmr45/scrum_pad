@@ -15,6 +15,7 @@ import {
   fetchAgoraRtmToken,
   getAuthSession,
   getCurrentUser,
+  getWorkspace,
   inviteWorkspaceUser,
   listWorkspaceMembers,
   listMyWorkspaces,
@@ -78,6 +79,17 @@ function workspaceCodeFromId(workspaceId: string) {
   return String(workspaceId || '').replace(/^workspace-/, '').toUpperCase() || 'NEW';
 }
 
+function workspaceIdFromCode(code: string) {
+  const trimmed = String(code || '').trim().toLowerCase();
+  if (!trimmed) return '';
+  const compact = trimmed.replace(/^workspace-/, '').replace(/[^a-z0-9]/g, '');
+  return compact ? `workspace-${compact}` : '';
+}
+
+function formatJoinCodeInput(value: string) {
+  return String(value || '').toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 32);
+}
+
 function formatDateLabel(value: string) {
   if (!value) return 'Not recorded';
   const date = new Date(value);
@@ -130,6 +142,7 @@ function HomePage() {
   const [autoJoinStarted, setAutoJoinStarted] = useState<boolean>(false);
   const [workspaceLoadComplete, setWorkspaceLoadComplete] = useState<boolean>(false);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('previous');
+  const [joinCode, setJoinCode] = useState<string>('');
 
   useEffect(() => {
     if (!hasConverterUrl) return;
@@ -358,6 +371,45 @@ function HomePage() {
     setGeneratedWorkspaceCode(generateWorkspaceCode());
   };
 
+  const handleJoinByCode = async () => {
+    if (!hasConverterUrl) {
+      setStatus('Set REACT_APP_LIBRE_BACKEND_URL before joining by code.');
+      return;
+    }
+    const workspaceId = workspaceIdFromCode(joinCode);
+    if (!workspaceId || workspaceId.replace(/^workspace-/, '').length < 4) {
+      setStatus('Enter a valid workspace code.');
+      return;
+    }
+
+    const knownWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
+    if (knownWorkspace) {
+      launchWorkspace(
+        knownWorkspace.name,
+        roleForWorkspace(knownWorkspace),
+        knownWorkspace.id,
+        knownWorkspace.member_color
+      );
+      return;
+    }
+
+    try {
+      const data = await getWorkspace(workspaceId);
+      const workspace = data.workspace;
+      if (!workspace || workspace.status === 'ended') {
+        setStatus('Workspace code is not active.');
+        return;
+      }
+      launchWorkspace(
+        workspace.name || `Workspace ${workspaceCodeFromId(workspaceId)}`,
+        'reviewer',
+        workspaceId
+      );
+    } catch (err) {
+      setStatus('Workspace code not found. Check the code and try again.');
+    }
+  };
+
   const copyShareLink = async () => {
     if (!shareLink) return;
     try {
@@ -505,6 +557,25 @@ function HomePage() {
           <div className="dashboard-actions">
             <button onClick={createGeneratedWorkspace}>Create as lead</button>
             <button onClick={() => setGeneratedWorkspaceCode(generateWorkspaceCode())}>New code</button>
+          </div>
+          <div className="join-code-card">
+            <div>
+              <span>Join workspace</span>
+              <strong>Enter code</strong>
+            </div>
+            <label>
+              Workspace code
+              <input
+                value={joinCode}
+                onChange={(evt: any) => setJoinCode(formatJoinCodeInput(evt.target.value))}
+                onKeyDown={(evt: any) => {
+                  if (evt.key === 'Enter') handleJoinByCode();
+                }}
+                placeholder="ABCD-EFGH"
+              />
+            </label>
+            <button disabled={!joinCode.trim()} onClick={handleJoinByCode}>Join workspace</button>
+            <small>Use the code shared by the lead reviewer. If you already have access, your role and color are kept.</small>
           </div>
           <div className="setup-warnings">
             {!hasAgoraAppId ? <p>Missing Agora App ID. Live collaboration is disabled.</p> : null}

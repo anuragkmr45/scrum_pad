@@ -208,6 +208,10 @@ export function createWorkspace(payload: any) {
   });
 }
 
+export function getWorkspace(workspaceId: string) {
+  return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
+}
+
 export function inviteWorkspaceUser(workspaceId: string, payload: any) {
   return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/invites`, {
     method: 'POST',
