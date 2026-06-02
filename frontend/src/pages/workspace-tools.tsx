@@ -72,6 +72,18 @@ function formatCountMap(value: any) {
   return entries.map(([key, count]) => `${key}: ${count}`).join(', ');
 }
 
+function contributorKey(row: any) {
+  return row.userId || row.userName || 'unknown';
+}
+
+function contributorName(row: any) {
+  return row.userName || 'Unknown contributor';
+}
+
+function humanizeEvent(value: any) {
+  return String(value || 'event').replace(/[_-]+/g, ' ');
+}
+
 function toCsv(rows: any[], columns: string[]) {
   return [
     columns.map(csvEscape).join(','),
@@ -99,6 +111,7 @@ function WorkspaceTools() {
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string>('');
   const [annotationTimeline, setAnnotationTimeline] = useState<any[]>([]);
   const [userReport, setUserReport] = useState<any[]>([]);
+  const [selectedContributor, setSelectedContributor] = useState<string>('all');
   const [archive, setArchive] = useState<any>(null);
   const [status, setStatus] = useState<string>('');
   const backendUrl = getBackendBaseUrl();
@@ -207,6 +220,24 @@ function WorkspaceTools() {
     byPage: 'Pages',
   };
   const workspaceCode = workspaceCodeFromId(workspaceId);
+  const contributorsByKey = history.reduce((items: { [key: string]: any }, row: any) => {
+    const key = contributorKey(row);
+    if (!items[key]) {
+      items[key] = {
+        key,
+        userName: contributorName(row),
+        userDesignation: row.userDesignation || '',
+        userColor: row.userColor || '#EB5E28',
+        total: 0,
+      };
+    }
+    items[key].total += 1;
+    return items;
+  }, {});
+  const contributors = Object.values(contributorsByKey);
+  const filteredHistory = selectedContributor === 'all'
+    ? history
+    : history.filter((row: any) => contributorKey(row) === selectedContributor);
   const formatHistoryValue = (row: any, column: string) => {
     if (column === 'timestamp') return formatDateTime(row[column]);
     if (column === 'annotationId' || column === 'documentId') return shortId(row[column]);
@@ -286,8 +317,69 @@ function WorkspaceTools() {
         <h2>Annotation History</h2>
         <div className="tool-actions">
           <button onClick={loadHistory}>Refresh</button>
-          <button onClick={() => downloadFile('hexscrum-annotation-history.csv', toCsv(history, historyColumns), 'text/csv')}>Export CSV</button>
-          <button onClick={() => downloadFile('hexscrum-annotation-history.json', JSON.stringify(history, null, 2), 'application/json')}>Export JSON</button>
+          <button onClick={() => downloadFile('hexscrum-annotation-history.csv', toCsv(filteredHistory, historyColumns), 'text/csv')}>Export CSV</button>
+          <button onClick={() => downloadFile('hexscrum-annotation-history.json', JSON.stringify(filteredHistory, null, 2), 'application/json')}>Export JSON</button>
+        </div>
+        <div className="contributor-filter-row" aria-label="Filter annotation history by contributor">
+          <button
+            className={selectedContributor === 'all' ? 'active' : ''}
+            onClick={() => setSelectedContributor('all')}
+          >
+            <span>All contributors</span>
+            <strong>{history.length}</strong>
+          </button>
+          {contributors.map((contributor: any) => (
+            <button
+              key={contributor.key}
+              className={selectedContributor === contributor.key ? 'active' : ''}
+              onClick={() => setSelectedContributor(contributor.key)}
+            >
+              <i style={{ background: contributor.userColor || '#EB5E28' }} />
+              <span>{contributor.userName}</span>
+              <strong>{contributor.total}</strong>
+            </button>
+          ))}
+        </div>
+        <div className="contributor-step-feed">
+          <div className="timeline-header compact">
+            <div>
+              <span className="eyebrow">Step-by-step activity</span>
+              <h3>{selectedContributor === 'all' ? 'All user actions' : `${(contributors.find((item: any) => item.key === selectedContributor) || {}).userName || 'Contributor'} actions`}</h3>
+            </div>
+            <strong>{filteredHistory.length}</strong>
+          </div>
+          {filteredHistory.length ? (
+            <ol className="contributor-step-list">
+              {filteredHistory.map((row: any, index: number) => (
+                <li key={`${row.annotationId || 'event'}-${row.timestamp || index}-${index}`}>
+                  <i style={{ background: row.userColor || '#EB5E28' }} />
+                  <article>
+                    <header>
+                      <strong>{humanizeEvent(row.action)} · {row.toolType || 'canvas'}</strong>
+                      <span>{formatDateTime(row.timestamp)}</span>
+                    </header>
+                    <p>{contributorName(row)} {row.userDesignation ? `- ${row.userDesignation}` : ''}</p>
+                    <dl>
+                      <div>
+                        <dt>Page</dt>
+                        <dd>{row.pageNumber || 1}</dd>
+                      </div>
+                      <div>
+                        <dt>Annotation</dt>
+                        <dd>{shortId(row.annotationId)}</dd>
+                      </div>
+                      <div>
+                        <dt>Document</dt>
+                        <dd>{shortId(row.documentId)}</dd>
+                      </div>
+                    </dl>
+                  </article>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="empty-state">No collaboration events are recorded for this contributor filter yet.</p>
+          )}
         </div>
         <div className="report-table">
           <table>
@@ -295,7 +387,7 @@ function WorkspaceTools() {
               <tr>{historyColumns.map(column => <th key={column}>{historyColumnLabels[column] || column}</th>)}</tr>
             </thead>
             <tbody>
-              {history.map((row, index) => (
+              {filteredHistory.map((row, index) => (
                 <tr
                   key={`${row.annotationId}-${index}`}
                   className={row.annotationId === selectedAnnotationId ? 'selected' : ''}

@@ -37,6 +37,8 @@ type WorkspaceRow = {
   status: string
   member_role: string
   member_color: string
+  member_status: string
+  member_joined_at?: string
   participant_count: number
   document_count: number
   annotation_event_count: number
@@ -95,6 +97,31 @@ function formatDateLabel(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function labelizeStatus(value: string) {
+  const normalized = String(value || 'active').replace(/[_-]+/g, ' ');
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function workspaceAccessStatus(workspace: WorkspaceRow) {
+  return workspace.member_status || 'active';
+}
+
+function workspaceStatusLabel(workspace: WorkspaceRow) {
+  const workspaceStatus = labelizeStatus(workspace.status || 'active');
+  const memberStatus = labelizeStatus(workspaceAccessStatus(workspace));
+  return workspaceStatus === memberStatus ? workspaceStatus : `${workspaceStatus} workspace · ${memberStatus} access`;
+}
+
+function canOpenWorkspace(workspace: WorkspaceRow) {
+  return (workspace.status || 'active') === 'active' && workspaceAccessStatus(workspace) === 'active';
+}
+
+function workspaceUnavailableReason(workspace: WorkspaceRow) {
+  if ((workspace.status || 'active') !== 'active') return `Workspace is ${labelizeStatus(workspace.status)}`;
+  if (workspaceAccessStatus(workspace) !== 'active') return `Your access is ${labelizeStatus(workspaceAccessStatus(workspace))}`;
+  return '';
 }
 
 function generateWorkspaceCode() {
@@ -267,6 +294,11 @@ function HomePage() {
     const role = memberRole === 'lead' ? 'teacher' : 'student';
     const uid = genUid();
     let leadLockAcquired = false;
+    const existingAccess = existingWorkspaceId ? workspaces.find((workspace) => workspace.id === existingWorkspaceId) : null;
+    if (existingAccess && !canOpenWorkspace(existingAccess)) {
+      setStatus(workspaceUnavailableReason(existingAccess) || 'This workspace is not available.');
+      return;
+    }
 
     const payload = {
       uid,
@@ -467,13 +499,46 @@ function HomePage() {
   };
 
   const joinedWorkspaces = authUser
-    ? workspaces.filter((workspace) => roleForWorkspace(workspace) === 'reviewer')
+    ? workspaces.filter((workspace) => canOpenWorkspace(workspace))
     : [];
+  const workspaceIds = new Set(workspaces.map((workspace) => workspace.id));
+  const invitationRowsForPrevious = invitations.filter((invite: any) => !workspaceIds.has(invite.workspace_id));
+  const pendingInviteCount = invitations.filter((invite: any) => (invite.status || 'pending') === 'pending').length;
   const visibleWorkspaces = workspaceTab === 'joined' ? joinedWorkspaces : workspaces;
+  const visibleInvitations = workspaceTab === 'invited'
+    ? invitations
+    : workspaceTab === 'previous'
+      ? invitationRowsForPrevious
+      : [];
   const workspaceTabCounts = {
-    previous: workspaces.length,
+    previous: workspaces.length + invitationRowsForPrevious.length,
     invited: invitations.length,
     joined: joinedWorkspaces.length,
+  };
+  const renderInvitationCard = (invite: any, index: number) => {
+    const inviteStatus = invite.status || 'pending';
+    const isAccepted = inviteStatus === 'accepted';
+    return (
+      <article key={invite.id || `${invite.workspace_id}-${index}`} className="workspace-card invite-card">
+        <div className="workspace-card-top">
+          <div>
+            <h3>{invite.workspace_name || 'Invited workspace'}</h3>
+            <span>{labelizeStatus(inviteStatus)} invitation · {isAccepted ? 'Joined' : 'Not joined yet'}</span>
+          </div>
+          <span className="workspace-code-inline">{workspaceCodeFromId(invite.workspace_id)}</span>
+        </div>
+        <div className="workspace-card-metrics">
+          <span>Role {labelizeStatus(invite.role || 'reviewer')}</span>
+          <span>Invited {formatDateLabel(invite.created_at)}</span>
+          <span>{invite.invited_email || authUser.email}</span>
+        </div>
+        <p className="workspace-card-helper">
+          {isAccepted
+            ? 'This invite has been accepted. Open the workspace from Previous or Joined when access is active.'
+            : 'Login with the invited email to accept access. Until then the workspace remains not joined.'}
+        </p>
+      </article>
+    );
   };
 
   if (!authUser) {
@@ -581,7 +646,7 @@ function HomePage() {
             {!hasAgoraAppId ? <p>Missing Agora App ID. Live collaboration is disabled.</p> : null}
             {!hasConverterUrl ? <p>Missing converter URL. Upload, auth, and reports need the backend.</p> : null}
             {hasConverterUrl && backendHealth.checked && !backendHealth.ok ? <p>Backend health check failed.</p> : null}
-            {invitations.length ? <p>{invitations.length} pending invite will appear after the invited account logs in.</p> : null}
+            {pendingInviteCount ? <p>{pendingInviteCount} pending invite will appear after the invited account logs in.</p> : null}
           </div>
           {status ? <p className="dashboard-status">{status}</p> : null}
         </section>
@@ -611,30 +676,18 @@ function HomePage() {
           </div>
           <div className="workspace-card-list">
             {workspaceTab === 'invited' ? (
-              invitations.length ? invitations.map((invite: any, index: number) => (
-                <article key={invite.id || `${invite.workspace_id}-${index}`} className="workspace-card invite-card">
-                  <div className="workspace-card-top">
-                    <div>
-                      <h3>{invite.workspace_name || 'Invited workspace'}</h3>
-                      <span>Pending invitation · Reviewer access</span>
-                    </div>
-                    <span className="workspace-code-inline">{workspaceCodeFromId(invite.workspace_id)}</span>
-                  </div>
-                  <div className="workspace-card-metrics">
-                    <span>Invited {formatDateLabel(invite.created_at)}</span>
-                    <span>{invite.invited_email || authUser.email}</span>
-                  </div>
-                  <p className="workspace-card-helper">Login with the invited email. Accepted workspaces appear under Previous and Joined.</p>
-                </article>
-              )) : <p className="empty-state">No pending invitations for {authUser.email}. Ask the lead reviewer to invite this email if a workspace is missing.</p>
-            ) : visibleWorkspaces.length ? visibleWorkspaces.map((workspace) => {
+              visibleInvitations.length ? visibleInvitations.map(renderInvitationCard) : <p className="empty-state">No invitations for {authUser.email}. Ask the lead reviewer to invite this email if a workspace is missing.</p>
+            ) : visibleWorkspaces.length || visibleInvitations.length ? (
+              <>
+                {visibleWorkspaces.map((workspace) => {
               const role = roleForWorkspace(workspace);
+              const canOpen = canOpenWorkspace(workspace);
               return (
                 <article key={workspace.id} className="workspace-card">
                   <div className="workspace-card-top">
                     <div>
                       <h3>{workspace.name}</h3>
-                      <span>{role === 'lead' ? 'Lead reviewer' : 'Reviewer'} · {workspace.status || 'active'}</span>
+                      <span>{role === 'lead' ? 'Lead reviewer' : 'Reviewer'} · {workspaceStatusLabel(workspace)}</span>
                     </div>
                     <div className="workspace-card-marker">
                       <span className="workspace-code-inline">{workspaceCodeFromId(workspace.id)}</span>
@@ -646,16 +699,21 @@ function HomePage() {
                     <span>{workspace.document_count || 0} documents</span>
                     <span>{workspace.annotation_event_count || 0} collaboration events</span>
                   </div>
-                  <p className="workspace-card-helper">History includes meeting notes, contributor reports, annotation timeline, and archive exports for this workspace.</p>
+                  <p className="workspace-card-helper">
+                    {canOpen ? 'History includes meeting notes, contributor reports, annotation timeline, and archive exports for this workspace.' : workspaceUnavailableReason(workspace)}
+                  </p>
                   <div className="workspace-card-actions">
-                    <button onClick={() => launchWorkspace(workspace.name, role, workspace.id, workspace.member_color)}>Open</button>
+                    <button disabled={!canOpen} onClick={() => launchWorkspace(workspace.name, role, workspace.id, workspace.member_color)}>{canOpen ? 'Open' : 'Unavailable'}</button>
                     <Link onClick={() => setWorkspaceId(workspace.id)} to="/workspace-tools">History</Link>
-                    {role === 'lead' ? <button onClick={() => loadWorkspaceMembers(workspace)}>Share</button> : null}
+                    {role === 'lead' && canOpen ? <button onClick={() => loadWorkspaceMembers(workspace)}>Share</button> : null}
                     {role === 'lead' && workspace.status !== 'ended' ? <button onClick={() => handleEndWorkspace(workspace)}>End</button> : null}
                   </div>
                 </article>
               );
-            }) : <p className="empty-state">{workspaceTab === 'joined' ? 'No joined reviewer workspaces yet.' : 'No saved workspace yet. Create one or ask the lead reviewer to share it with your email.'}</p>}
+            })}
+                {visibleInvitations.map(renderInvitationCard)}
+              </>
+            ) : <p className="empty-state">{workspaceTab === 'joined' ? 'No active joined workspaces yet.' : 'No saved workspace yet. Create one or ask the lead reviewer to share it with your email.'}</p>}
           </div>
         </section>
 

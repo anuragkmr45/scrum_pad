@@ -1039,7 +1039,7 @@ async function listWorkspacesForUser(userId) {
   if (!userId) return { workspaces: [], invitations: [] };
   if (!pool) {
     const memberships = memory.workspace_members.filter(
-      member => member.user_id === userId && member.status === "active"
+      member => member.user_id === userId
     );
     const workspaces = memberships
       .map(member => {
@@ -1049,6 +1049,8 @@ async function listWorkspacesForUser(userId) {
           ...workspace,
           member_role: member.role,
           member_color: member.color,
+          member_status: member.status || "active",
+          member_joined_at: member.joined_at || member.created_at || workspace.created_at,
           participant_count: memory.workspace_members.filter(
             item => item.workspace_id === workspace.id && item.status === "active"
           ).length,
@@ -1057,15 +1059,24 @@ async function listWorkspacesForUser(userId) {
         };
       })
       .filter(Boolean)
-      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      .sort((a, b) => String(b.member_joined_at || b.created_at).localeCompare(String(a.member_joined_at || a.created_at)));
     const user = memory.users.find(item => item.id === userId);
     const invitations = user
       ? memory.workspace_invites.filter(
-          invite => invite.invited_email === normalizeEmail(user.email) && invite.status === "pending"
-        )
+          invite => invite.invited_email === normalizeEmail(user.email) || invite.invited_user_id === userId
+        ).map(invite => {
+          const workspace = memory.workspaces.find(item => item.id === invite.workspace_id);
+          return {
+            ...invite,
+            workspace_name: workspace ? workspace.name : ""
+          };
+        }).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
       : [];
     return { workspaces, invitations };
   }
+
+  const user = await getUserById(userId);
+  const userEmail = user && user.email ? normalizeEmail(user.email) : "";
 
   const workspaceResult = await query(
     `SELECT
@@ -1073,22 +1084,24 @@ async function listWorkspacesForUser(userId) {
        wm.role AS member_role,
        wm.color AS member_color,
        wm.status AS member_status,
+       wm.joined_at AS member_joined_at,
+       wm.created_at AS member_created_at,
        (SELECT count(*)::int FROM workspace_members m WHERE m.workspace_id = w.id AND m.status = 'active') AS participant_count,
        (SELECT count(*)::int FROM documents d WHERE d.workspace_id = w.id) AS document_count,
        (SELECT count(*)::int FROM annotation_events e WHERE e.workspace_id = w.id) AS annotation_event_count
      FROM workspaces w
      INNER JOIN workspace_members wm ON wm.workspace_id = w.id
-     WHERE wm.user_id = $1 AND wm.status = 'active'
-     ORDER BY w.created_at DESC`,
+     WHERE wm.user_id = $1
+     ORDER BY COALESCE(wm.joined_at, wm.created_at, w.created_at) DESC`,
     [userId]
   );
   const invitationResult = await query(
     `SELECT wi.*, w.name AS workspace_name
      FROM workspace_invites wi
      LEFT JOIN workspaces w ON w.id = wi.workspace_id
-     WHERE wi.invited_user_id = $1 AND wi.status = 'pending'
+     WHERE wi.invited_user_id = $1 OR wi.invited_email = $2
      ORDER BY wi.created_at DESC`,
-    [userId]
+    [userId, userEmail]
   );
   return {
     workspaces: workspaceResult.rows,
