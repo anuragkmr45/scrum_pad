@@ -75,9 +75,6 @@ export function Nav ({
           >
             Leave
           </button>
-          <Icon className="icon-exit" onClick={(evt: any) => {
-            handleClick("exit");
-          }} />
         </div>
       </div>
     </div>
