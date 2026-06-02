@@ -1,5 +1,6 @@
 /* eslint-disable default-case */
 import React, { useState, useContext, useEffect, useRef, useMemo } from "react";
+import ReactDOM from "react-dom";
 import { fileContext } from "../mediaboard";
 import PDFJSAnnotate from "../../utils/PdfAnnotate/PDFJSAnnotate";
 import NearMeIcon from '@material-ui/icons/NearMe';
@@ -28,6 +29,7 @@ const Toolelements = () => {
   let [color, changeColor] = useState('#EB5E28');
   let [colorPicker, setColorPicker] = useState(false);
   let [sizePicker, setSizePicker] = useState(false);
+  const [pickerPosition, setPickerPosition] = useState({ top: 180, left: 92 });
   const [uploadStatus, setUploadStatus] = useState(null);
   const [toolbarCollapsed, setToolbarCollapsed] = useState(false);
   const [clearModalOpen, setClearModalOpen] = useState(false);
@@ -199,24 +201,39 @@ const Toolelements = () => {
   const handleClearClick = () => {
     setClearModalOpen(true);
   };
-  const displayColorPicker = () => {
-
-    if(colorPicker) setColorPicker(false);
-    else {
-      setToolType('')
-      setSizePicker(false);
-      setColorPicker(true);
-    }
- }
-
- const displaySizePicker = () =>  {
-  if(sizePicker) setSizePicker(false);
-  else {
-    setToolType('')
-    setColorPicker(false);
-    setSizePicker(true);
+  const getPickerPosition = (event, width = 240, height = 320) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {
+      top: Math.max(64, Math.min(window.innerHeight - height - 16, rect.top - 8)),
+      left: Math.max(72, Math.min(window.innerWidth - width - 16, rect.right + 14)),
+    };
   }
- }
+
+  const displayColorPicker = (event) => {
+    event && event.stopPropagation();
+    setSizePicker(false);
+    if (event) {
+      setPickerPosition(getPickerPosition(event, 240, 320));
+    }
+    setColorPicker((current) => !current);
+  }
+
+  const displaySizePicker = (event) =>  {
+    event && event.stopPropagation();
+    setColorPicker(false);
+    if (event) {
+      setPickerPosition(getPickerPosition(event, 250, 96));
+    }
+    setSizePicker((current) => !current);
+  }
+
+  const stopPickerEvent = (event) => {
+    event && event.stopPropagation();
+  }
+
+  const handleThicknessChange = (event) => {
+    changeThickness(Number(event.target.value));
+  }
 
   const showLoader = () => {
     let tag = document.createElement("div");
@@ -334,6 +351,7 @@ const Toolelements = () => {
 
 
   const inputFileRef = useRef(null);
+  const popoverRoot = typeof document !== 'undefined' ? document.body : null;
 
   const handleFileUpload = () => {
     if (!canManageWorkspace) {
@@ -401,17 +419,6 @@ const Toolelements = () => {
               className= {colorPicker ? 'icon items color_pick active' : 'icon items color_pick'}
             />
             <span className="tooltiptext">Pencil Color</span>
-          <div
-            className="sub-menu nav-colopiker nav-pen"
-            style={ colorPicker ? { display: "block" } : {display: "none"}}
-          >
-            <SketchPicker
-            color={ color }
-            onChangeComplete={ (color) => {
-              changeColor(color.hex)
-            } }
-            />
-            </div>
           </div>
             <div onClick={displaySizePicker} className="menu-mat-icons">
             <LineWeightIcon
@@ -419,27 +426,6 @@ const Toolelements = () => {
               className= {sizePicker ? 'icon items size_pick active' : 'icon items size_pick'}
             />
             <span className="tooltiptext">Thickness</span>
-          <div
-            className="sub-menu nav-colopiker-thickness nav-pen"
-            style={ sizePicker ? { display: "block" } : {display: "none"}}
-          >
-          <div className="rangeslider-box">
-              {" "}
-              <label>Thickness</label>
-              <div className="slider">
-                {" "}
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
-                  value={thickness}
-                  className="slider-color"
-                  id="penThicknessRange"
-                  onChange={(e) => changeThickness(e.target.value)}
-                />
-              </div>{" "}
-            </div>
-            </div>
           </div>
 
           <div className="menu-mat-icons">
@@ -529,6 +515,54 @@ const Toolelements = () => {
           }
         </div> : null}
       </div>
+      {popoverRoot ? ReactDOM.createPortal(
+        <>
+          {colorPicker ?
+            <div
+              className="toolbar-settings-popover toolbar-color-popover"
+              style={{ top: pickerPosition.top, left: pickerPosition.left }}
+              onClick={stopPickerEvent}
+              onMouseDown={stopPickerEvent}
+              onPointerDown={stopPickerEvent}
+            >
+              <SketchPicker
+                color={color}
+                onChange={(nextColor) => {
+                  changeColor(nextColor.hex)
+                }}
+                onChangeComplete={(nextColor) => {
+                  changeColor(nextColor.hex)
+                }}
+              />
+            </div> : null}
+          {sizePicker ?
+            <div
+              className="toolbar-settings-popover toolbar-thickness-popover"
+              style={{ top: pickerPosition.top, left: pickerPosition.left }}
+              onClick={stopPickerEvent}
+              onMouseDown={stopPickerEvent}
+              onPointerDown={stopPickerEvent}
+            >
+              <div className="rangeslider-box">
+                <label htmlFor="penThicknessRange">Thickness</label>
+                <div className="slider">
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    value={thickness}
+                    className="slider-color"
+                    id="penThicknessRange"
+                    onInput={handleThicknessChange}
+                    onChange={handleThicknessChange}
+                  />
+                  <span className="thickness-value">{thickness}px</span>
+                </div>
+              </div>
+            </div> : null}
+        </>,
+        popoverRoot
+      ) : null}
       {canManageWorkspace ?
         <input
           type="file"

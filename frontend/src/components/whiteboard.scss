@@ -623,6 +623,73 @@ div.media-board{
   top: 0;
 }
 
+.sub-menu.nav-colopiker-thickness.nav-pen .slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sub-menu.nav-colopiker-thickness.nav-pen .thickness-value {
+  min-width: 34px;
+  color: #403d39;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: right;
+}
+
+.toolbar-settings-popover {
+  position: fixed;
+  z-index: 2400;
+  pointer-events: auto;
+  border: 1px solid rgba(64, 61, 57, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 252, 242, 0.98);
+  box-shadow: 0 18px 44px rgba(37, 36, 34, 0.24);
+}
+
+.toolbar-settings-popover .sketch-picker {
+  position: static !important;
+  top: auto !important;
+  left: auto !important;
+  z-index: auto !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+.toolbar-thickness-popover {
+  width: 230px;
+  padding: 12px;
+}
+
+.toolbar-thickness-popover .rangeslider-box label {
+  display: block;
+  margin-bottom: 10px;
+  color: #403d39;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.toolbar-thickness-popover .slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar-thickness-popover .slider-color {
+  flex: 1;
+  accent-color: #eb5e28;
+}
+
+.toolbar-thickness-popover .thickness-value {
+  min-width: 34px;
+  color: #403d39;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+  text-align: right;
+}
+
 // .classroom.big-class .room-container .sub-menu.nav-colopiker.nav-pen {
 //   bottom: auto;
 //   top: 230px;
