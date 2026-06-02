@@ -1049,7 +1049,7 @@ async function createWorkspace(body) {
     "";
   const memberRole = body.memberRole || body.member_role || "reviewer";
   const workspace = {
-    id: body.id || makeId("ws"),
+    id: body.id || body.workspaceId || body.workspace_id || makeId("ws"),
     name: body.name || "Untitled Workspace",
     owner_user_id: body.ownerUserId || body.owner_user_id || "",
     status: body.status || "active",
@@ -1230,6 +1230,24 @@ async function listWorkspaceMembers(workspaceId) {
     [workspaceId]
   );
   return result.rows;
+}
+
+async function getWorkspaceMember(workspaceId, userId) {
+  if (!workspaceId || !userId) return null;
+  if (!pool) {
+    return memory.workspace_members.find(
+      member => member.workspace_id === workspaceId && member.user_id === userId
+    ) || null;
+  }
+
+  const result = await query(
+    `SELECT *
+     FROM workspace_members
+     WHERE workspace_id = $1 AND user_id = $2
+     LIMIT 1`,
+    [workspaceId, userId]
+  );
+  return result.rows[0] || null;
 }
 
 async function updateWorkspaceMemberStatus(body) {
@@ -1657,6 +1675,7 @@ module.exports = {
   listWorkspacesForUser,
   addWorkspaceMember,
   listWorkspaceMembers,
+  getWorkspaceMember,
   updateWorkspaceMemberStatus,
   inviteWorkspaceUser,
   acceptWorkspaceInvite,

@@ -281,7 +281,7 @@ function corsMiddleware(req, res, next) {
     res.header("Vary", "Origin");
   }
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
-  res.header("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS,POST,PUT,DELETE");
+  res.header("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE");
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
   }
@@ -638,6 +638,13 @@ app.delete(
 app.post(
   "/api/workspaces/:id/presence",
   requireAuth(async function(req, res) {
+    const member = await auditStore.getWorkspaceMember(req.params.id, req.user.id);
+    if (member && ["kicked", "blocked", "ended"].includes(member.status)) {
+      return res.status(403).json({
+        error: "workspace_access_removed",
+        status: member.status
+      });
+    }
     const result = await auditStore.heartbeatWorkspacePresence({
       workspaceId: req.params.id,
       userId: req.user.id,
@@ -647,7 +654,10 @@ app.post(
       color: req.body.color || req.user.color,
       role: req.body.role || "reviewer"
     });
-    return res.status(200).json(result);
+    return res.status(200).json({
+      ...result,
+      memberStatus: member ? member.status : "active"
+    });
   })
 );
 

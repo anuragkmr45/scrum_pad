@@ -441,6 +441,32 @@
   opacity: 1;
 }
 
+.media-board .controls .leave-workspace-control {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding: 0 8px 0 4px;
+  border: 1px solid rgba(235, 94, 40, 0.4);
+  border-radius: 999px;
+  background: rgba(235, 94, 40, 0.1);
+  color: #eb5e28;
+  flex: 0 0 auto;
+}
+
+.media-board .controls .leave-workspace-control svg {
+  margin: 0 4px;
+  color: #eb5e28;
+}
+
+.leave-workspace-label {
+  color: #eb5e28;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+}
+
 .media-board {
   flex: 1;
   position: relative;
@@ -1291,6 +1317,13 @@ div#remove_page:after{
   border-radius: 12px;
   color: rgba(37, 36, 34, 0.62);
   font-size: 13px;
+}
+
+.participant-control-status {
+  margin: -4px 0 10px;
+  color: #eb5e28;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .share-control-code,

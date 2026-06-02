@@ -103,8 +103,10 @@
     min-width: 0;
     .btn-group {
       display: flex;
-      min-width: 42px;
-      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      min-width: 92px;
+      justify-content: flex-end;
     }
     .electron-btn-group {
       display: flex;
@@ -117,6 +119,23 @@
       min-width: 74px;
       justify-content: space-between;
     }
+  }
+}
+
+.leave-workspace-nav {
+  min-height: 30px;
+  border: 1px solid rgba(235, 94, 40, 0.7);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: rgba(235, 94, 40, 0.14);
+  color: #fffcf2;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover {
+    background: #eb5e28;
   }
 }
 
@@ -169,7 +188,7 @@
 @media screen and (max-width: 900px) {
   .nav-container {
     padding: 0 10px;
-    grid-template-columns: minmax(58px, 0.8fr) minmax(0, auto) minmax(84px, 0.8fr);
+    grid-template-columns: minmax(54px, 0.65fr) minmax(0, 1fr) auto;
 
     .room-name {
       max-width: 26vw;
@@ -183,7 +202,7 @@
 
 @media screen and (max-width: 680px) {
   .nav-container {
-    grid-template-columns: minmax(34px, 0.55fr) minmax(0, auto) minmax(70px, 0.65fr);
+    grid-template-columns: minmax(30px, 0.45fr) minmax(0, 1fr) auto;
     column-gap: 6px;
 
     .room-name {
@@ -213,6 +232,12 @@
     .timer {
       max-width: 66px;
       min-width: 66px;
+    }
+
+    .leave-workspace-nav {
+      min-height: 28px;
+      padding: 0 10px;
+      font-size: 11px;
     }
   }
 }

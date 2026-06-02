@@ -68,6 +68,13 @@ export function Nav ({
         </div>
         <span className="menu-split" />
         <div className={platform === 'web' ? "btn-group" : 'electron-btn-group' }>
+          <button
+            type="button"
+            className="leave-workspace-nav"
+            onClick={() => handleClick("exit")}
+          >
+            Leave
+          </button>
           <Icon className="icon-exit" onClick={(evt: any) => {
             handleClick("exit");
           }} />

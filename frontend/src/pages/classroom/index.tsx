@@ -38,7 +38,32 @@ export function RoomPage({ children }: any) {
     heartbeatWorkspacePresence(workspaceId, {
       role: room.me.role === 'teacher' ? 'lead' : 'reviewer',
       color: profile.color || user.color,
-    }).catch(() => {});
+    })
+      .then((result: any) => {
+        if (['kicked', 'blocked', 'ended'].includes(result.memberStatus)) {
+          globalStore.showToast({
+            type: 'notice',
+            message: 'Your workspace access was changed by the lead reviewer.',
+          });
+          roomStore.exitAll()
+            .catch(console.warn)
+            .finally(() => history.push('/'));
+        }
+      })
+      .catch((err: any) => {
+        const status = err && err.data && err.data.status;
+        if (err && err.status === 403 && ['kicked', 'blocked', 'ended'].includes(status)) {
+          globalStore.showToast({
+            type: 'notice',
+            message: status === 'blocked'
+              ? 'The lead reviewer blocked your access to this workspace.'
+              : 'The lead reviewer removed you from this workspace.',
+          });
+          roomStore.exitAll()
+            .catch(console.warn)
+            .finally(() => history.push('/'));
+        }
+      });
   };
 
   useEffect(() => {

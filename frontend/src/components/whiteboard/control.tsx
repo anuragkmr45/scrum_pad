@@ -30,6 +30,7 @@ import KeyboardArrowDownIcon from '@material-ui/icons/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@material-ui/icons/KeyboardArrowUp';
 import PeopleIcon from '@material-ui/icons/People';
 import ShareIcon from '@material-ui/icons/Share';
+import ExitToAppIcon from '@material-ui/icons/ExitToApp';
 import { undoAnnotations, redoAnnotations, getAnnotationHistoryState, addHistoryStateListener } from '../../utils/annotation-history';
 import { getHexscrumProfile, getWorkspaceId, getWorkspacePresence, inviteWorkspaceUser, listWorkspaceMembers, searchUsers, updateWorkspaceMemberStatus, workspaceJoinLink } from '../../utils/hexscrum-api';
 
@@ -347,9 +348,12 @@ export default function Control({
   const [shareUsers, setShareUsers] = useState<any[]>([]);
   const [shareLink, setShareLink] = useState('');
   const [shareStatus, setShareStatus] = useState('');
+  const [participantStatus, setParticipantStatus] = useState('');
+  const [participantsLoading, setParticipantsLoading] = useState(false);
   let recorder = useRef<any>();
   let desktopStream = useRef<any>();
   const previewRequestId = useRef(0);
+  const participantRequestInFlight = useRef(false);
   // to get current canvas number
   const [currentCanvasNumber, setCanvasNumber] = useState(1);
   const isLiveReview = useMemo(() => Boolean(location.pathname.match(/one-to-one/)), [location.pathname]);
@@ -532,6 +536,9 @@ export default function Control({
   const loadParticipants = () => {
     const workspaceId = currentWorkspaceId();
     if (!workspaceId || !canManageWorkspace) return;
+    if (participantRequestInFlight.current) return;
+    participantRequestInFlight.current = true;
+    setParticipantsLoading(true);
     Promise.all([
       listWorkspaceMembers(workspaceId),
       getWorkspacePresence(workspaceId),
@@ -539,12 +546,18 @@ export default function Control({
       .then(([memberData, presenceData]: any[]) => {
         setWorkspaceMembers(memberData.members || []);
         setWorkspacePresence(presenceData.participants || []);
+        setParticipantStatus('Participants updated.');
       })
       .catch((err: any) => {
+        setParticipantStatus(err.message || 'Unable to load participants');
         globalStore.showToast({
           type: 'notice-board',
           message: err.message || 'Unable to load participants',
         });
+      })
+      .finally(() => {
+        participantRequestInFlight.current = false;
+        setParticipantsLoading(false);
       });
   };
 
@@ -552,14 +565,11 @@ export default function Control({
     const next = !participantPanelOpen;
     setParticipantPanelOpen(next);
     if (next) setSharePanelOpen(false);
-    if (next) loadParticipants();
   };
 
   useEffect(() => {
     if (!participantPanelOpen || !canManageWorkspace) return undefined;
     loadParticipants();
-    const timer = window.setInterval(loadParticipants, 3000);
-    return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [participantPanelOpen, canManageWorkspace]);
 
@@ -658,14 +668,31 @@ export default function Control({
     return Object.values(participantMap).filter((user: any) => user.uid);
   };
 
+  const normalizeIdentity = (value: any) => String(value || '').trim().toLowerCase();
+
   const memberForParticipant = (participant: any) => {
     if (!participant.authUserId) return null;
     return workspaceMembers.find((member) => member.user_id === participant.authUserId) || null;
   };
 
+  const memberForAnyParticipant = (participant: any) => {
+    const directMember = memberForParticipant(participant);
+    if (directMember) return directMember;
+    const account = normalizeIdentity(participant.account);
+    if (!account) return null;
+    return workspaceMembers.find((member) => {
+      return [member.user_name, member.user_email, member.user_id]
+        .map(normalizeIdentity)
+        .filter(Boolean)
+        .includes(account);
+    }) || null;
+  };
+
   const updateParticipantStatus = async (participant: any, status: 'active' | 'kicked' | 'blocked') => {
     const workspaceId = currentWorkspaceId();
-    if (!workspaceId || !participant.authUserId) {
+    const linkedMember = memberForAnyParticipant(participant);
+    const targetAuthUserId = (linkedMember && linkedMember.user_id) || participant.authUserId || '';
+    if (!workspaceId || !targetAuthUserId) {
       globalStore.showToast({
         type: 'notice-board',
         message: 'Participant identity is not available yet.',
@@ -674,30 +701,48 @@ export default function Control({
     }
 
     try {
-      await updateWorkspaceMemberStatus(workspaceId, participant.authUserId, status);
+      const result: any = await updateWorkspaceMemberStatus(workspaceId, targetAuthUserId, status);
+      if (result && result.member) {
+        setWorkspaceMembers((current) => current.map((member) => (
+          member.user_id === targetAuthUserId ? { ...member, status: result.member.status } : member
+        )));
+      }
       if (status !== 'active') {
-        await roomStore.rtmClient.sendChannelMessage(JSON.stringify({
-          type: 'participant-status',
-          workspaceId,
-          targetUid: participant.uid,
-          targetAuthUserId: participant.authUserId,
-          status,
-          message: status === 'blocked'
-            ? 'The lead reviewer blocked your access to this workspace.'
-            : 'The lead reviewer removed you from this workspace.',
-        }));
+        try {
+          await roomStore.rtmClient.sendChannelMessage(JSON.stringify({
+            type: 'participant-status',
+            workspaceId,
+            targetUid: participant.uid,
+            targetAuthUserId,
+            status,
+            message: status === 'blocked'
+              ? 'The lead reviewer blocked your access to this workspace.'
+              : 'The lead reviewer removed you from this workspace.',
+          }));
+        } catch (broadcastErr) {
+          console.warn('Participant status broadcast failed:', broadcastErr);
+        }
       }
       loadParticipants();
+      setParticipantStatus(`${participant.account || 'Reviewer'} marked as ${status}.`);
       globalStore.showToast({
         type: 'notice-board',
         message: `${participant.account || 'Reviewer'} marked as ${status}.`,
       });
     } catch (err) {
+      setParticipantStatus(err.message || 'Unable to update participant status');
       globalStore.showToast({
         type: 'notice-board',
         message: err.message || 'Unable to update participant status',
       });
     }
+  };
+
+  const leaveWorkspace = () => {
+    globalStore.showDialog({
+      type: 'exitRoom',
+      message: t('toast.quit_room'),
+    });
   };
 
   const toggleExportCanvas = (canvasId: string) => {
@@ -1025,6 +1070,11 @@ export default function Control({
                 <ShareIcon onClick={openSharePanel} />
                 <span className="tooltiptext">Share workspace</span>
               </div> : null}
+            <div className='control-button leave-workspace-control'>
+              <ExitToAppIcon onClick={leaveWorkspace} />
+              <span className="tooltiptext">Leave workspace</span>
+              <span className="leave-workspace-label">Leave</span>
+            </div>
             {
               role === 'teacher' ?
                 (
@@ -1152,16 +1202,20 @@ export default function Control({
                 <strong>Participants</strong>
               </div>
               <div className="participant-control-header-actions">
-                <button onClick={loadParticipants}>Refresh</button>
+                <button onClick={loadParticipants} disabled={participantsLoading}>
+                  {participantsLoading ? 'Refreshing...' : 'Refresh'}
+                </button>
                 <button onClick={() => setParticipantPanelOpen(false)}>Close</button>
               </div>
             </div>
+            {participantStatus ? <p className="participant-control-status">{participantStatus}</p> : null}
             <div className="participant-control-list">
               {activeParticipants().length ? activeParticipants().map((participant: any) => {
-                const linkedMember = memberForParticipant(participant);
+                const linkedMember = memberForAnyParticipant(participant);
                 const profile = getHexscrumProfile();
                 const isSelf = String(participant.uid) === String(roomStore._state.me.uid) ||
-                  (participant.authUserId && String(participant.authUserId) === String(profile.userId));
+                  (participant.authUserId && String(participant.authUserId) === String(profile.userId)) ||
+                  (linkedMember && String(linkedMember.user_id) === String(profile.userId));
                 const participantState = linkedMember
                   ? linkedMember.status
                   : participant.memberOnly
