@@ -659,6 +659,17 @@ app.get(
   })
 );
 
+app.delete(
+  "/api/workspaces/:id/presence",
+  requireAuth(async function(req, res) {
+    const result = await auditStore.clearWorkspacePresence({
+      workspaceId: req.params.id,
+      userId: req.user.id
+    });
+    return res.status(200).json(result);
+  })
+);
+
 app.get(
   "/api/agora/rtm-token",
   asyncRoute(async function(req, res) {

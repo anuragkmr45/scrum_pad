@@ -11,6 +11,7 @@ import { sendToRemote } from './whiteboard';
 import LocalStoreAdapter from '../utils/PdfAnnotate/adapter/LocalStoreAdapter';
 import { RoomMessage } from '../utils/agora-rtm-client';
 import PDFJSAnnotate from '../utils/PdfAnnotate/PDFJSAnnotate';
+import { getWorkspace, getWorkspaceId } from '../utils/hexscrum-api';
 
 
 interface MediaBoardProps {
@@ -268,6 +269,31 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
       dispatch({ type: 'remote-add-page', fileId });
     });
   }, [roomState.course.boardId, roomState.users]);
+
+  useEffect(() => {
+    const workspaceId = getWorkspaceId() || roomStore.state.course.rid || '';
+    if (!workspaceId) return;
+
+    let cancelled = false;
+    getWorkspace(workspaceId)
+      .then((data: any) => {
+        if (cancelled) return;
+        const documents = ((data && data.workspace && data.workspace.documents) || [])
+          .slice()
+          .sort((first: any, second: any) => String(first.created_at || '').localeCompare(String(second.created_at || '')));
+        documents.forEach((document: any) => {
+          const fileUrl = document.converted_pdf_url || document.convertedPdfUrl || document.storage_url || document.storageUrl || '';
+          if (fileUrl) {
+            dispatch({ type: 'remote-add-page', fileId: fileUrl });
+          }
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     setCurrentPage(1);

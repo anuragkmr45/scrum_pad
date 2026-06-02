@@ -31,7 +31,7 @@ import KeyboardArrowUpIcon from '@material-ui/icons/KeyboardArrowUp';
 import PeopleIcon from '@material-ui/icons/People';
 import ShareIcon from '@material-ui/icons/Share';
 import { undoAnnotations, redoAnnotations, getAnnotationHistoryState, addHistoryStateListener } from '../../utils/annotation-history';
-import { getWorkspaceId, inviteWorkspaceUser, listWorkspaceMembers, searchUsers, updateWorkspaceMemberStatus } from '../../utils/hexscrum-api';
+import { getHexscrumProfile, getWorkspaceId, getWorkspacePresence, inviteWorkspaceUser, listWorkspaceMembers, searchUsers, updateWorkspaceMemberStatus, workspaceJoinLink } from '../../utils/hexscrum-api';
 
 
 interface ControlItemProps {
@@ -340,6 +340,7 @@ export default function Control({
   const [controlsCollapsed, setControlsCollapsed] = useState(false);
   const [participantPanelOpen, setParticipantPanelOpen] = useState(false);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRow[]>([]);
+  const [workspacePresence, setWorkspacePresence] = useState<any[]>([]);
   const [sharePanelOpen, setSharePanelOpen] = useState(false);
   const [selectedShareUser, setSelectedShareUser] = useState<any>(null);
   const [shareSearch, setShareSearch] = useState('');
@@ -525,14 +526,20 @@ export default function Control({
 
   const currentWorkspaceInviteLink = () => {
     const workspaceId = currentWorkspaceId();
-    return workspaceId ? `${window.location.origin}/?join=${encodeURIComponent(workspaceId)}` : '';
+    return workspaceJoinLink(workspaceId);
   };
 
   const loadParticipants = () => {
     const workspaceId = currentWorkspaceId();
     if (!workspaceId || !canManageWorkspace) return;
-    listWorkspaceMembers(workspaceId)
-      .then((data: any) => setWorkspaceMembers(data.members || []))
+    Promise.all([
+      listWorkspaceMembers(workspaceId),
+      getWorkspacePresence(workspaceId),
+    ])
+      .then(([memberData, presenceData]: any[]) => {
+        setWorkspaceMembers(memberData.members || []);
+        setWorkspacePresence(presenceData.participants || []);
+      })
       .catch((err: any) => {
         globalStore.showToast({
           type: 'notice-board',
@@ -547,6 +554,14 @@ export default function Control({
     if (next) setSharePanelOpen(false);
     if (next) loadParticipants();
   };
+
+  useEffect(() => {
+    if (!participantPanelOpen || !canManageWorkspace) return undefined;
+    loadParticipants();
+    const timer = window.setInterval(loadParticipants, 3000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [participantPanelOpen, canManageWorkspace]);
 
   const openSharePanel = () => {
     setSharePanelOpen(true);
@@ -601,9 +616,44 @@ export default function Control({
   const activeParticipants = () => {
     const me = roomStore._state.me || {};
     const participantMap: { [key: string]: any } = {};
-    if (me.uid) participantMap[String(me.uid)] = me;
+    const keyFor = (user: any) => user.authUserId ? `auth:${user.authUserId}` : `uid:${user.uid}`;
+    if (me.uid || me.authUserId) participantMap[keyFor(me)] = me;
     roomStore._state.users.toArray().forEach((user: any) => {
-      if (user.uid) participantMap[String(user.uid)] = user;
+      if (user.uid || user.authUserId) participantMap[keyFor(user)] = user;
+    });
+    workspacePresence.forEach((presence: any) => {
+      const lastSeenAt = Date.parse(presence.lastSeenAt || '');
+      if (lastSeenAt && Date.now() - lastSeenAt > 25000) return;
+      const presenceUser = {
+        uid: presence.userId || presence.user_id,
+        authUserId: presence.userId || presence.user_id,
+        account: presence.name || presence.email || 'Reviewer',
+        role: presence.role === 'lead' ? 'teacher' : 'student',
+        presenceOnly: true,
+        lastSeenAt: presence.lastSeenAt,
+      };
+      if (!presenceUser.authUserId) return;
+      const key = keyFor(presenceUser);
+      participantMap[key] = {
+        ...presenceUser,
+        ...(participantMap[key] || {}),
+        lastSeenAt: presence.lastSeenAt,
+      };
+    });
+    workspaceMembers.forEach((member: any) => {
+      if (!member.user_id) return;
+      const memberUser = {
+        uid: member.user_id,
+        authUserId: member.user_id,
+        account: member.user_name || member.user_email || member.user_id,
+        role: member.role === 'lead' ? 'teacher' : 'student',
+        memberOnly: true,
+      };
+      const key = keyFor(memberUser);
+      participantMap[key] = {
+        ...memberUser,
+        ...(participantMap[key] || {}),
+      };
     });
     return Object.values(participantMap).filter((user: any) => user.uid);
   };
@@ -1101,17 +1151,27 @@ export default function Control({
                 <span>Lead controls</span>
                 <strong>Participants</strong>
               </div>
-              <button onClick={() => setParticipantPanelOpen(false)}>Close</button>
+              <div className="participant-control-header-actions">
+                <button onClick={loadParticipants}>Refresh</button>
+                <button onClick={() => setParticipantPanelOpen(false)}>Close</button>
+              </div>
             </div>
             <div className="participant-control-list">
-              {activeParticipants().map((participant: any) => {
+              {activeParticipants().length ? activeParticipants().map((participant: any) => {
                 const linkedMember = memberForParticipant(participant);
-                const isSelf = String(participant.uid) === String(roomStore._state.me.uid);
+                const profile = getHexscrumProfile();
+                const isSelf = String(participant.uid) === String(roomStore._state.me.uid) ||
+                  (participant.authUserId && String(participant.authUserId) === String(profile.userId));
+                const participantState = linkedMember
+                  ? linkedMember.status
+                  : participant.memberOnly
+                    ? 'offline'
+                    : 'live';
                 return (
                   <div key={participant.uid} className="participant-control-row">
                     <div>
                       <strong>{participant.account || participant.uid}</strong>
-                      <span>{participant.role === 'teacher' ? 'Lead reviewer' : 'Reviewer'} · {linkedMember ? linkedMember.status : 'live'}</span>
+                      <span>{participant.role === 'teacher' ? 'Lead reviewer' : 'Reviewer'} · {participantState}</span>
                     </div>
                     {isSelf || participant.role === 'teacher' ? <small>{isSelf ? 'You' : 'Lead'}</small> : (
                       <div className="participant-control-actions">
@@ -1122,7 +1182,7 @@ export default function Control({
                     )}
                   </div>
                 );
-              })}
+              }) : <p className="participant-empty-state">No active participants yet.</p>}
             </div>
           </div> : null}
       </div>

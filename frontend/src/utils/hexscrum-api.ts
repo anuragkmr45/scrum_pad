@@ -110,6 +110,25 @@ export function setWorkspaceId(workspaceId: string) {
   } catch (err) {}
 }
 
+export function workspaceJoinLink(workspaceId: string) {
+  if (!workspaceId || typeof window === 'undefined') return '';
+  return `${window.location.origin}/#/?join=${encodeURIComponent(workspaceId)}`;
+}
+
+export function getWorkspaceJoinParam(routeSearch: string = '') {
+  const routeJoin = new URLSearchParams(routeSearch || '').get('join') || '';
+  if (routeJoin) return routeJoin;
+  if (typeof window === 'undefined') return '';
+
+  const pageJoin = new URLSearchParams(window.location.search || '').get('join') || '';
+  if (pageJoin) return pageJoin;
+
+  const hash = window.location.hash || '';
+  const queryStart = hash.indexOf('?');
+  if (queryStart === -1) return '';
+  return new URLSearchParams(hash.slice(queryStart)).get('join') || '';
+}
+
 export async function backendRequest(path: string, init: RequestInit = {}) {
   const baseUrl = getBackendBaseUrl();
   if (!baseUrl) {
@@ -259,6 +278,12 @@ export function getWorkspacePresence(workspaceId: string) {
   return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/presence`);
 }
 
+export function clearWorkspacePresence(workspaceId: string) {
+  return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/presence`, {
+    method: 'DELETE',
+  });
+}
+
 export function postAnnotationEvent(payload: any) {
   return backendRequest('/api/annotations/events', {
     method: 'POST',
@@ -268,6 +293,10 @@ export function postAnnotationEvent(payload: any) {
 
 export function getAnnotationHistory(workspaceId: string) {
   return backendRequest(`/api/reports/annotation-history?workspaceId=${encodeURIComponent(workspaceId)}`);
+}
+
+export function getAnnotationEvents(workspaceId: string) {
+  return backendRequest(`/api/annotations/events?workspaceId=${encodeURIComponent(workspaceId)}`);
 }
 
 export function getRecentAnnotationEvents(workspaceId: string) {

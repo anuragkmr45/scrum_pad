@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useHistory } from 'react-router-dom';
+import { useHistory } from 'react-router-dom';
 import {
   generateArchive,
   getAnnotationHistory,
@@ -40,6 +40,13 @@ function htmlEscape(value: any) {
 
 function workspaceCodeFromId(workspaceId: string) {
   return String(workspaceId || '').replace(/^workspace-/, '').toUpperCase() || 'No workspace selected';
+}
+
+function workspaceIdFromInput(value: string) {
+  const trimmed = String(value || '').trim().toLowerCase();
+  if (!trimmed) return '';
+  const compact = trimmed.replace(/^workspace-/, '').replace(/[^a-z0-9]/g, '');
+  return compact ? `workspace-${compact}` : '';
 }
 
 function shortId(value: any) {
@@ -98,6 +105,14 @@ function notesAsHtml(notes: any[]) {
   return `<!doctype html><html><head><meta charset="utf-8"><title>HexScrum Meeting Notes</title></head><body>${rows.join('')}</body></html>`;
 }
 
+function actionErrorMessage(err: any) {
+  if (!err) return 'Action failed.';
+  if (err.status === 401) return 'Login session expired. Please login again.';
+  if (err.message === 'backend_url_missing') return 'Missing converter API URL. Set REACT_APP_LIBRE_BACKEND_URL.';
+  if (err.message === 'Failed to fetch') return 'Converter API is not reachable. Check backend health and CORS.';
+  return err.message || 'Action failed.';
+}
+
 function WorkspaceTools() {
   document.title = 'HexScrum Notes & Reports';
 
@@ -117,32 +132,71 @@ function WorkspaceTools() {
   const backendUrl = getBackendBaseUrl();
 
   useEffect(() => {
+    const root = document.documentElement;
+    document.body.classList.remove('touch-action-disable');
+    root.classList.add('workspace-tools-scroll-enabled');
+    document.body.classList.add('workspace-tools-scroll-enabled');
+
+    return () => {
+      root.classList.remove('workspace-tools-scroll-enabled');
+      document.body.classList.remove('workspace-tools-scroll-enabled');
+    };
+  }, []);
+
+  useEffect(() => {
     if (!currentUser) {
       routerHistory.push('/');
     }
   }, [currentUser, routerHistory]);
 
   const rememberWorkspace = (value: string) => {
-    updateWorkspaceId(value);
-    setWorkspaceId(value);
+    const normalized = workspaceIdFromInput(value);
+    updateWorkspaceId(normalized);
+    setWorkspaceId(normalized);
+    setStatus(normalized ? `Selected ${workspaceCodeFromId(normalized)}` : 'Enter a workspace code first.');
+  };
+
+  const canUseBackend = () => {
+    if (!backendUrl) {
+      setStatus('Missing converter API URL. Set REACT_APP_LIBRE_BACKEND_URL.');
+      return false;
+    }
+    return true;
+  };
+
+  const canUseWorkspace = () => {
+    if (!workspaceId) {
+      setStatus('Enter or select a workspace code first.');
+      return false;
+    }
+    return true;
   };
 
   const loadNotes = () => {
-    if (!workspaceId) return;
+    if (!canUseBackend() || !canUseWorkspace()) return;
+    setStatus('Loading meeting notes...');
     getMeetingNotes(workspaceId)
-      .then((data: any) => setNotes(data.notes || []))
-      .catch((err: any) => setStatus(err.message));
+      .then((data: any) => {
+        setNotes(data.notes || []);
+        setStatus(`Loaded ${(data.notes || []).length} meeting notes.`);
+      })
+      .catch((err: any) => setStatus(actionErrorMessage(err)));
   };
 
   const loadHistory = () => {
-    if (!workspaceId) return;
+    if (!canUseBackend() || !canUseWorkspace()) return;
+    setStatus('Loading annotation history...');
     getAnnotationHistory(workspaceId)
-      .then((data: any) => setHistory(data.report || []))
-      .catch((err: any) => setStatus(err.message));
+      .then((data: any) => {
+        setHistory(data.report || []);
+        setStatus(`Loaded ${(data.report || []).length} annotation events.`);
+      })
+      .catch((err: any) => setStatus(actionErrorMessage(err)));
   };
 
   const loadAnnotationTimeline = (annotationId: string) => {
-    if (!workspaceId || !annotationId) {
+    if (!canUseBackend() || !canUseWorkspace()) return;
+    if (!annotationId) {
       setStatus('This event does not have an annotation id.');
       return;
     }
@@ -152,14 +206,18 @@ function WorkspaceTools() {
         setAnnotationTimeline(data.events || []);
         setStatus((data.events || []).length ? 'Timeline loaded' : 'No timeline found for this annotation.');
       })
-      .catch((err: any) => setStatus(err.message));
+      .catch((err: any) => setStatus(actionErrorMessage(err)));
   };
 
   const loadUserReport = () => {
-    if (!workspaceId) return;
+    if (!canUseBackend() || !canUseWorkspace()) return;
+    setStatus('Loading user-wise report...');
     getUserWiseReport(workspaceId)
-      .then((data: any) => setUserReport(data.report || []))
-      .catch((err: any) => setStatus(err.message));
+      .then((data: any) => {
+        setUserReport(data.report || []);
+        setStatus(`Loaded ${(data.report || []).length} user report rows.`);
+      })
+      .catch((err: any) => setStatus(actionErrorMessage(err)));
   };
 
   useEffect(() => {
@@ -171,7 +229,12 @@ function WorkspaceTools() {
   }, [workspaceId, backendUrl]);
 
   const handleSaveNote = () => {
-    if (!workspaceId || !noteBody.trim()) return;
+    if (!canUseBackend() || !canUseWorkspace()) return;
+    if (!noteBody.trim()) {
+      setStatus('Write a meeting note before saving.');
+      return;
+    }
+    setStatus('Saving meeting note...');
     saveMeetingNote({
       workspaceId,
       authorUserId: profile.userId,
@@ -183,11 +246,12 @@ function WorkspaceTools() {
         setStatus('Saved');
         loadNotes();
       })
-      .catch((err: any) => setStatus(err.message));
+      .catch((err: any) => setStatus(actionErrorMessage(err)));
   };
 
   const handleArchive = () => {
-    if (!workspaceId) return;
+    if (!canUseBackend() || !canUseWorkspace()) return;
+    setStatus('Generating meeting archive...');
     generateArchive({
       workspaceId,
       requestedByUserId: profile.userId,
@@ -196,7 +260,12 @@ function WorkspaceTools() {
         setArchive(data.manifest);
         setStatus('Archive generated');
       })
-      .catch((err: any) => setStatus(err.message));
+      .catch((err: any) => setStatus(actionErrorMessage(err)));
+  };
+
+  const handleDownload = (fileName: string, content: string, type: string, label: string) => {
+    downloadFile(fileName, content, type);
+    setStatus(`${label} download started.`);
   };
 
   const historyColumns = ['timestamp', 'userName', 'userDesignation', 'action', 'toolType', 'pageNumber', 'annotationId', 'documentId'];
@@ -260,7 +329,7 @@ function WorkspaceTools() {
           <h1>Workspace documentation</h1>
           <span>{profile.name || 'Local User'} {profile.designation ? `- ${profile.designation}` : ''}</span>
         </div>
-        <Link to="/">Back</Link>
+        <button className="workspace-tools-back" type="button" onClick={() => routerHistory.push('/')}>Back</button>
       </header>
 
       {!backendUrl ? <p className="setup-warning">Missing REACT_APP_LIBRE_BACKEND_URL.</p> : null}
@@ -297,10 +366,10 @@ function WorkspaceTools() {
         <h2>Meeting Notes</h2>
         <textarea value={noteBody} onChange={(evt: any) => setNoteBody(evt.target.value)} />
         <div className="tool-actions">
-          <button onClick={handleSaveNote}>Save Note</button>
-          <button onClick={loadNotes}>Refresh</button>
-          <button onClick={() => downloadFile('hexscrum-meeting-notes.html', notesAsHtml(notes), 'text/html')}>Export HTML</button>
-          <button onClick={() => downloadFile('hexscrum-meeting-notes.json', JSON.stringify(notes, null, 2), 'application/json')}>Export JSON</button>
+          <button type="button" onClick={handleSaveNote}>Save Note</button>
+          <button type="button" onClick={loadNotes}>Refresh</button>
+          <button type="button" onClick={() => handleDownload('hexscrum-meeting-notes.html', notesAsHtml(notes), 'text/html', 'Meeting notes HTML')}>Export HTML</button>
+          <button type="button" onClick={() => handleDownload('hexscrum-meeting-notes.json', JSON.stringify(notes, null, 2), 'application/json', 'Meeting notes JSON')}>Export JSON</button>
         </div>
         <ul className="notes-list">
           {notes.map(note => (
@@ -316,9 +385,9 @@ function WorkspaceTools() {
       <section className="workspace-tools-section">
         <h2>Annotation History</h2>
         <div className="tool-actions">
-          <button onClick={loadHistory}>Refresh</button>
-          <button onClick={() => downloadFile('hexscrum-annotation-history.csv', toCsv(filteredHistory, historyColumns), 'text/csv')}>Export CSV</button>
-          <button onClick={() => downloadFile('hexscrum-annotation-history.json', JSON.stringify(filteredHistory, null, 2), 'application/json')}>Export JSON</button>
+          <button type="button" onClick={loadHistory}>Refresh</button>
+          <button type="button" onClick={() => handleDownload('hexscrum-annotation-history.csv', toCsv(filteredHistory, historyColumns), 'text/csv', 'Annotation history CSV')}>Export CSV</button>
+          <button type="button" onClick={() => handleDownload('hexscrum-annotation-history.json', JSON.stringify(filteredHistory, null, 2), 'application/json', 'Annotation history JSON')}>Export JSON</button>
         </div>
         <div className="contributor-filter-row" aria-label="Filter annotation history by contributor">
           <button
@@ -449,14 +518,14 @@ function WorkspaceTools() {
       <section className="workspace-tools-section">
         <h2>User-wise Report</h2>
         <div className="tool-actions">
-          <button onClick={loadUserReport}>Refresh</button>
-          <button onClick={() => downloadFile('hexscrum-user-wise-report.csv', toCsv(userReport.map(row => ({
+          <button type="button" onClick={loadUserReport}>Refresh</button>
+          <button type="button" onClick={() => handleDownload('hexscrum-user-wise-report.csv', toCsv(userReport.map(row => ({
             ...row,
             byAction: JSON.stringify(row.byAction || {}),
             byTool: JSON.stringify(row.byTool || {}),
             byPage: JSON.stringify(row.byPage || {}),
-          })), userColumns), 'text/csv')}>Export CSV</button>
-          <button onClick={() => downloadFile('hexscrum-user-wise-report.json', JSON.stringify(userReport, null, 2), 'application/json')}>Export JSON</button>
+          })), userColumns), 'text/csv', 'User-wise report CSV')}>Export CSV</button>
+          <button type="button" onClick={() => handleDownload('hexscrum-user-wise-report.json', JSON.stringify(userReport, null, 2), 'application/json', 'User-wise report JSON')}>Export JSON</button>
         </div>
         <div className="report-table">
           <table>
@@ -482,10 +551,11 @@ function WorkspaceTools() {
       <section className="workspace-tools-section">
         <h2>Meeting Archive</h2>
         <div className="tool-actions">
-          <button onClick={handleArchive}>Generate Manifest</button>
+          <button type="button" onClick={handleArchive}>Generate Manifest</button>
           <button
+            type="button"
             disabled={!archive}
-            onClick={() => downloadFile('hexscrum-meeting-archive-manifest.json', JSON.stringify(archive, null, 2), 'application/json')}
+            onClick={() => handleDownload('hexscrum-meeting-archive-manifest.json', JSON.stringify(archive, null, 2), 'application/json', 'Archive manifest JSON')}
           >
             Download JSON
           </button>

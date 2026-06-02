@@ -8,7 +8,7 @@ import { fileContext } from "./mediaboard";
 import { toggleNext, togglePrev, toggleFirstLast } from "./whiteboard/control";
 import FullScreen from './fullscreen/index';
 import { t } from '../i18n';
-import { getHexscrumProfile, getWorkspaceId, postAnnotationEvent } from '../utils/hexscrum-api';
+import { getAnnotationEvents, getHexscrumProfile, getWorkspaceId, postAnnotationEvent } from '../utils/hexscrum-api';
 import { addSnapshotAppliedListener } from '../utils/annotation-history';
 
 (typeof window !== "undefined"
@@ -51,6 +51,142 @@ const inferPageNumber = annotation => {
   return Number(annotation.page || annotation.pageNumber || 1);
 };
 
+const eventField = (event, camelName, snakeName) => (
+  event && event[camelName] !== undefined ? event[camelName] : event && event[snakeName]
+);
+
+const parseJsonField = (value) => {
+  if (!value) return null;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch (err) {
+    return null;
+  }
+};
+
+const numberValue = (value, fallback = 0) => {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : fallback;
+};
+
+const hasBox = (annotation) => (
+  annotation &&
+  annotation.x !== undefined &&
+  annotation.y !== undefined &&
+  annotation.width !== undefined &&
+  annotation.height !== undefined
+);
+
+const boxFromAnnotation = (annotation) => ({
+  x: numberValue(annotation.x),
+  y: numberValue(annotation.y),
+  width: numberValue(annotation.width),
+  height: numberValue(annotation.height),
+});
+
+const normalizeRenderableAnnotation = (annotation) => {
+  if (!annotation || !annotation.type) return null;
+  const next = { ...annotation };
+  const rawType = String(next.type || '').toLowerCase();
+  next.type = rawType === 'rectangle' || rawType === 'rect' ? 'area' : rawType === 'circle' ? 'ellipse' : rawType;
+
+  if (next.type === 'highlight') {
+    if (!Array.isArray(next.rectangles) || !next.rectangles.length) {
+      if (!hasBox(next)) return null;
+      next.rectangles = [boxFromAnnotation(next)];
+    }
+    next.rectangles = next.rectangles
+      .map((rect) => ({
+        x: numberValue(rect.x),
+        y: numberValue(rect.y),
+        width: numberValue(rect.width),
+        height: numberValue(rect.height),
+      }))
+      .filter((rect) => rect.width > 0 && rect.height > 0);
+    return next.rectangles.length ? next : null;
+  }
+
+  if (next.type === 'area' || next.type === 'ellipse') {
+    if (!hasBox(next) && Array.isArray(next.rectangles) && next.rectangles[0]) {
+      Object.assign(next, boxFromAnnotation(next.rectangles[0]));
+    }
+    return hasBox(next) && numberValue(next.width) > 0 && numberValue(next.height) > 0 ? next : null;
+  }
+
+  if (next.type === 'line') {
+    if (
+      next.x1 === undefined &&
+      next.y1 === undefined &&
+      next.x2 === undefined &&
+      next.y2 === undefined &&
+      hasBox(next)
+    ) {
+      next.x1 = numberValue(next.x);
+      next.y1 = numberValue(next.y);
+      next.x2 = numberValue(next.x) + numberValue(next.width);
+      next.y2 = numberValue(next.y) + numberValue(next.height);
+    }
+    return next.x1 !== undefined && next.y1 !== undefined && next.x2 !== undefined && next.y2 !== undefined ? next : null;
+  }
+
+  if (next.type === 'drawing') {
+    return Array.isArray(next.lines) && next.lines.length ? next : null;
+  }
+
+  if (next.type === 'textbox') {
+    return hasBox(next) || next.content ? next : null;
+  }
+
+  return null;
+};
+
+const normalizePersistedAnnotation = (event) => {
+  const afterState = parseJsonField(eventField(event, 'afterState', 'after_state'));
+  if (!afterState || Array.isArray(afterState) || typeof afterState !== 'object') return null;
+  if (!afterState.type) return null;
+
+  const annotationId = eventField(event, 'annotationId', 'annotation_id');
+  const pageNumber = Number(eventField(event, 'pageNumber', 'page_number') || afterState.page || 1);
+  return normalizeRenderableAnnotation({
+    ...afterState,
+    uuid: afterState.uuid || afterState.id || annotationId,
+    class: afterState.class || 'Annotation',
+    page: pageNumber,
+  });
+};
+
+const reconstructAnnotationsByDocument = (events) => {
+  const byDocument = {};
+  (events || []).forEach((event) => {
+    const documentId = eventField(event, 'documentId', 'document_id');
+    if (!documentId) return;
+    if (!byDocument[documentId]) byDocument[documentId] = [];
+
+    const action = String(event.action || '').toLowerCase();
+    const annotationId = eventField(event, 'annotationId', 'annotation_id');
+
+    if (action === 'reset') {
+      byDocument[documentId] = [];
+      return;
+    }
+
+    if (action === 'deleted' || action === 'removed') {
+      byDocument[documentId] = byDocument[documentId].filter((annotation) => (
+        String(annotation.uuid || annotation.id || '') !== String(annotationId || '')
+      ));
+      return;
+    }
+
+    const annotation = normalizePersistedAnnotation(event);
+    if (!annotation || !annotation.uuid) return;
+    const index = byDocument[documentId].findIndex((item) => String(item.uuid) === String(annotation.uuid));
+    if (index === -1) byDocument[documentId].push(annotation);
+    else byDocument[documentId][index] = annotation;
+  });
+  return byDocument;
+};
+
 const trackAnnotationEvent = (action, documentId, annotation, annotationId, beforeState) => {
   try {
     const workspaceId = getWorkspaceId() || roomStore._state.course.rid || '';
@@ -81,6 +217,7 @@ const trackAnnotationEvent = (action, documentId, annotation, annotationId, befo
 
 const Whiteboard = () => {
   const arrayStoreAdapterRef = useRef(null);
+  const hydrationKeyRef = useRef('');
   if (!arrayStoreAdapterRef.current) {
     arrayStoreAdapterRef.current = new PDFJSAnnotate.ArrayStoreAdapter();
   }
@@ -260,8 +397,8 @@ const Whiteboard = () => {
   const renderRemoteAnnotations = (documentId, pageNumber, attempt = 0) => {
     const svg = findAnnotationLayer(documentId, pageNumber);
     if (!svg) {
-      if (attempt < 8) {
-        window.setTimeout(() => renderRemoteAnnotations(documentId, pageNumber, attempt + 1), 120);
+      if (attempt < 30) {
+        window.setTimeout(() => renderRemoteAnnotations(documentId, pageNumber, attempt + 1), 160);
       }
       return Promise.resolve(false);
     }
@@ -318,6 +455,34 @@ const Whiteboard = () => {
       })
       .catch(() => false);
   };
+
+  useEffect(() => {
+    const workspaceId = getWorkspaceId() || roomStore._state.course.rid || '';
+    if (!workspaceId) return;
+
+    const hydrationKey = `${workspaceId}:${fileState.pdfFiles.map(String).join('|')}`;
+    if (hydrationKeyRef.current === hydrationKey) return;
+    hydrationKeyRef.current = hydrationKey;
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      getAnnotationEvents(workspaceId)
+        .then((data) => {
+          if (cancelled) return;
+          const byDocument = reconstructAnnotationsByDocument(data.events || []);
+          Object.keys(byDocument).forEach((documentId) => {
+            replaceRemoteAnnotations(documentId, byDocument[documentId]);
+          });
+        })
+        .catch(() => {});
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileState.pdfFiles.length]);
 
   useEffect(() => {
 

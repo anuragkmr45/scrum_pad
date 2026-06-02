@@ -16,6 +16,7 @@ import {
   getAuthSession,
   getCurrentUser,
   getWorkspace,
+  getWorkspaceJoinParam,
   inviteWorkspaceUser,
   listWorkspaceMembers,
   listMyWorkspaces,
@@ -26,6 +27,7 @@ import {
   searchUsers,
   setWorkspaceId,
   updateWorkspaceMemberStatus,
+  workspaceJoinLink,
 } from '../utils/hexscrum-api';
 
 type MemberRole = 'lead' | 'reviewer';
@@ -144,7 +146,7 @@ function HomePage() {
 
   const history = useHistory();
   const location = useLocation();
-  const joinWorkspaceId = new URLSearchParams(location.search).get('join') || '';
+  const joinWorkspaceId = getWorkspaceJoinParam(location.search);
   const session = getAuthSession();
   const [authUser, setAuthUser] = useState<any>(getCurrentUser());
   const [authMode, setAuthMode] = useState<'login' | 'register'>(session ? 'login' : 'register');
@@ -170,6 +172,10 @@ function HomePage() {
   const [workspaceLoadComplete, setWorkspaceLoadComplete] = useState<boolean>(false);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('previous');
   const [joinCode, setJoinCode] = useState<string>('');
+
+  useEffect(() => {
+    setAutoJoinStarted(false);
+  }, [joinWorkspaceId]);
 
   useEffect(() => {
     if (!hasConverterUrl) return;
@@ -260,7 +266,7 @@ function HomePage() {
     setShareWorkspace(workspace);
     setSelectedShareUser(null);
     setUserResults([]);
-    setShareLink(workspace ? `${window.location.origin}/?join=${encodeURIComponent(workspace.id)}` : '');
+    setShareLink(workspace ? workspaceJoinLink(workspace.id) : '');
     setWorkspaceMembers([]);
     if (!workspace) return;
     const role = roleForWorkspace(workspace);
@@ -473,7 +479,7 @@ function HomePage() {
       role: 'reviewer',
     })
       .then(() => {
-        const link = `${window.location.origin}/?join=${encodeURIComponent(shareWorkspace.id)}`;
+        const link = workspaceJoinLink(shareWorkspace.id);
         setShareLink(link);
         setStatus(`Workspace invite created for ${selectedShareUser.name || selectedShareUser.email || 'selected reviewer'}.`);
         setSelectedShareUser(null);

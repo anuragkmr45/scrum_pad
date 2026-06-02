@@ -16,7 +16,13 @@ export default function renderRect(a) {
       fillOpacity: 0.25
     });
 
-    a.rectangles.forEach((r) => {
+    const rectangles = Array.isArray(a.rectangles) && a.rectangles.length
+      ? a.rectangles
+      : a.x !== undefined && a.y !== undefined && a.width !== undefined && a.height !== undefined
+        ? [{ x: a.x, y: a.y, width: a.width, height: a.height }]
+        : [];
+
+    rectangles.forEach((r) => {
       group.appendChild(createRect(r));
     });
 

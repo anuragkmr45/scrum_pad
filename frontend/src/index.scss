@@ -54,6 +54,34 @@ body.touch-action-disable * {
   overscroll-behavior: contain;
 }
 
+html.workspace-tools-scroll-enabled,
+html.workspace-tools-scroll-enabled body,
+html.workspace-tools-scroll-enabled #root,
+body.workspace-tools-scroll-enabled,
+body.workspace-tools-scroll-enabled #root {
+  min-height: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+html.workspace-tools-scroll-enabled body,
+body.workspace-tools-scroll-enabled {
+  overflow-x: hidden;
+  overflow-y: auto;
+  touch-action: auto;
+  overscroll-behavior: auto;
+}
+
+body.workspace-tools-scroll-enabled.touch-action-disable,
+body.workspace-tools-scroll-enabled.touch-action-disable * {
+  touch-action: auto;
+  overscroll-behavior: auto;
+}
+
+body > iframe[style*="2147483647"] {
+  pointer-events: none !important;
+}
+
 .MuiButtonBase-root.custom-button {
   box-shadow: none;
   background: var(--rustic-paprika);
@@ -945,9 +973,9 @@ body.touch-action-disable * {
 }
 
 .workspace-tools-page {
-  min-height: 100%;
-  height: 100vh;
-  overflow: auto;
+  min-height: 100vh;
+  height: auto;
+  overflow: visible;
   -webkit-overflow-scrolling: touch;
   background: var(--rustic-floral);
   color: var(--rustic-carbon);
@@ -971,11 +999,15 @@ body.touch-action-disable * {
     color: var(--rustic-ink-soft);
     font-size: 14px;
   }
-  a {
+  a,
+  .workspace-tools-back {
     color: var(--rustic-paprika);
     font-size: 14px;
     font-weight: 600;
     text-decoration: none;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
   }
 }
 
@@ -1096,9 +1128,8 @@ body.touch-action-disable * {
 
 .workspace-tools-page {
   min-height: 100vh;
-  height: 100vh;
-  height: 100dvh;
-  overflow-y: auto;
+  height: auto;
+  overflow-y: visible;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   box-sizing: border-box;
@@ -1916,7 +1947,8 @@ body.touch-action-disable * {
     color: var(--rustic-ink-soft);
   }
 
-  a {
+  a,
+  .workspace-tools-back {
     display: inline-flex;
     align-items: center;
     min-height: 36px;
@@ -1925,6 +1957,10 @@ body.touch-action-disable * {
     border-radius: 999px;
     color: var(--rustic-charcoal);
     background: var(--rustic-panel);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
 
     &:hover {
       color: var(--rustic-paprika);

@@ -13,7 +13,6 @@ import DeleteIcon from '@material-ui/icons/Delete';
 import FormatColorTextIcon from '@material-ui/icons/FormatColorText';
 import PublishIcon from '@material-ui/icons/Publish';
 import KeyboardArrowLeftIcon from '@material-ui/icons/KeyboardArrowLeft';
-import KeyboardArrowRightIcon from '@material-ui/icons/KeyboardArrowRight';
 import UI from "../../utils/PdfAnnotate/UI";
 import { SketchPicker } from 'react-color';
 import LineWeightIcon from '@material-ui/icons/LineWeight';
@@ -362,11 +361,12 @@ const Toolelements = () => {
       <div className={`menu ${toolbarCollapsed ? 'toolbar-collapsed' : ''}`}>
         <button
           type="button"
-          className="toolbar-collapse-toggle"
+          className={`toolbar-collapse-toggle ${toolbarCollapsed ? 'edit-workspace-toggle' : ''}`}
           onClick={() => setToolbarCollapsed(!toolbarCollapsed)}
-          aria-label={toolbarCollapsed ? 'Open side toolbar' : 'Close side toolbar'}
+          aria-label={toolbarCollapsed ? 'Edit workspace' : 'Close side toolbar'}
         >
-          {toolbarCollapsed ? <KeyboardArrowRightIcon /> : <KeyboardArrowLeftIcon />}
+          {toolbarCollapsed ? <CreateIcon /> : <KeyboardArrowLeftIcon />}
+          <span className="tooltiptext">{toolbarCollapsed ? 'Edit workspace' : 'Close tools'}</span>
         </button>
         {!toolbarCollapsed && canManageWorkspace ?
           <button

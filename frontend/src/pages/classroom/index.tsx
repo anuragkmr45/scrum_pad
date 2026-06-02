@@ -7,6 +7,7 @@ import { roomStore } from '../../stores/room';
 import { globalStore } from '../../stores/global';
 import { t } from '../../i18n';
 import {
+  clearWorkspacePresence,
   endWorkspace,
   fetchAgoraRtmToken,
   getCurrentUser,
@@ -86,7 +87,7 @@ export function RoomPage({ children }: any) {
         if (presenceTimer.current) {
           window.clearInterval(presenceTimer.current);
         }
-        presenceTimer.current = window.setInterval(sendPresenceHeartbeat, 20000);
+        presenceTimer.current = window.setInterval(sendPresenceHeartbeat, 10000);
 
       }).catch((err: any) => {
       globalStore.showToast({
@@ -118,6 +119,7 @@ export function RoomPage({ children }: any) {
         Boolean(location.pathname.match(/one-to-one/));
       if (isLeadLeavingWorkspace) {
         const workspaceId = room.course.rid;
+        clearWorkspacePresence(workspaceId).catch(() => {});
         endWorkspace(workspaceId).catch(() => {});
         releaseWorkspaceLeadLock(workspaceId).catch(() => {});
         roomStore.rtmClient.sendChannelMessage(JSON.stringify({
@@ -125,6 +127,8 @@ export function RoomPage({ children }: any) {
           workspaceId,
           endedBy: room.me.uid,
         })).catch(() => {});
+      } else if (room.course.rid) {
+        clearWorkspacePresence(room.course.rid).catch(() => {});
       }
       globalStore.removeUploadNotice();
       roomStore.exitAll()

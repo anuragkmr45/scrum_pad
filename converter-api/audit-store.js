@@ -432,6 +432,25 @@ async function listWorkspacePresence(workspaceId) {
   }
 }
 
+async function clearWorkspacePresence(body) {
+  const workspaceId = body.workspaceId || body.workspace_id || "";
+  const userId = body.userId || body.user_id || "";
+  if (!workspaceId || !userId) return { ok: false };
+
+  if (!upstashConfigured) {
+    if (memory.workspace_presence[workspaceId]) {
+      delete memory.workspace_presence[workspaceId][userId];
+      if (!Object.keys(memory.workspace_presence[workspaceId]).length) {
+        delete memory.workspace_presence[workspaceId];
+      }
+    }
+    return { ok: true };
+  }
+
+  await upstashCommand(["HDEL", workspacePresenceKey(workspaceId), userId]);
+  return { ok: true };
+}
+
 async function query(sql, params) {
   if (!pool) return null;
   return pool.query(sql, params);
@@ -889,7 +908,7 @@ async function acceptPendingInvites(user) {
 
   if (!pool) {
     const invites = memory.workspace_invites.filter(
-      invite => invite.invited_email === email && invite.status === "pending"
+      invite => invite.invited_email === email && invite.status === "pending" && !invite.invited_user_id
     );
     for (const invite of invites) {
       invite.status = "accepted";
@@ -908,7 +927,9 @@ async function acceptPendingInvites(user) {
   const result = await query(
     `UPDATE workspace_invites
      SET status = 'accepted', accepted_at = now(), invited_user_id = $1
-     WHERE invited_email = $2 AND status = 'pending'
+     WHERE invited_email = $2
+       AND status = 'pending'
+       AND (invited_user_id IS NULL OR invited_user_id = '')
      RETURNING *`,
     [serialized.id, email]
   );
@@ -994,7 +1015,15 @@ async function upsertUser(user) {
   };
   if (!pool) {
     const existing = memory.users.find(item => item.id === row.id);
-    if (existing) Object.assign(existing, row, { updated_at: nowIso() });
+    if (existing) {
+      Object.assign(existing, {
+        name: row.name || existing.name || "",
+        email: row.email || existing.email || "",
+        designation: row.designation || existing.designation || "",
+        color: row.color || existing.color || "",
+        updated_at: nowIso()
+      });
+    }
     else memory.users.push({ ...row, created_at: nowIso(), updated_at: nowIso() });
     return row;
   }
@@ -1002,10 +1031,10 @@ async function upsertUser(user) {
     `INSERT INTO users (id, name, email, designation, color)
      VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (id) DO UPDATE SET
-       name = EXCLUDED.name,
-       email = EXCLUDED.email,
-       designation = EXCLUDED.designation,
-       color = EXCLUDED.color,
+       name = COALESCE(NULLIF(EXCLUDED.name, ''), users.name),
+       email = COALESCE(NULLIF(EXCLUDED.email, ''), users.email),
+       designation = COALESCE(NULLIF(EXCLUDED.designation, ''), users.designation),
+       color = COALESCE(NULLIF(EXCLUDED.color, ''), users.color),
        updated_at = now()`,
     [row.id, row.name, row.email, row.designation, row.color]
   );
@@ -1013,6 +1042,12 @@ async function upsertUser(user) {
 }
 
 async function createWorkspace(body) {
+  const joiningUserId =
+    body.authUserId ||
+    body.auth_user_id ||
+    (body.metadata && (body.metadata.authUserId || body.metadata.auth_user_id)) ||
+    "";
+  const memberRole = body.memberRole || body.member_role || "reviewer";
   const workspace = {
     id: body.id || makeId("ws"),
     name: body.name || "Untitled Workspace",
@@ -1022,6 +1057,23 @@ async function createWorkspace(body) {
     started_at: body.startedAt || body.started_at || nowIso(),
     created_at: nowIso()
   };
+  const memberUserId = workspace.owner_user_id || joiningUserId;
+  const ensureMember = async workspaceId => {
+    if (!memberUserId) return null;
+    if (memberRole !== "lead") {
+      const accepted = await acceptWorkspaceInvite({
+        workspaceId,
+        userId: memberUserId
+      });
+      if (accepted && accepted.member) return accepted.member;
+    }
+    return addWorkspaceMember({
+      workspaceId,
+      userId: memberUserId,
+      role: memberRole,
+      color: workspace.metadata.userColor
+    });
+  };
   if (!pool) {
     const existing = memory.workspaces.find(item => item.id === workspace.id);
     if (existing) {
@@ -1029,25 +1081,11 @@ async function createWorkspace(body) {
         ...workspace,
         owner_user_id: existing.owner_user_id || workspace.owner_user_id
       });
-      if (workspace.owner_user_id) {
-        await addWorkspaceMember({
-          workspaceId: existing.id,
-          userId: workspace.owner_user_id,
-          role: body.memberRole || "lead",
-          color: workspace.metadata.userColor
-        });
-      }
+      await ensureMember(existing.id);
       return existing;
     }
     memory.workspaces.push(workspace);
-    if (workspace.owner_user_id) {
-      await addWorkspaceMember({
-        workspaceId: workspace.id,
-        userId: workspace.owner_user_id,
-        role: body.memberRole || "lead",
-        color: workspace.metadata.userColor
-      });
-    }
+    await ensureMember(workspace.id);
     return workspace;
   }
   const result = await query(
@@ -1060,14 +1098,7 @@ async function createWorkspace(body) {
      RETURNING *`,
     [workspace.id, workspace.name, workspace.owner_user_id, workspace.status, workspace.metadata, workspace.started_at]
   );
-  if (workspace.owner_user_id) {
-    await addWorkspaceMember({
-      workspaceId: result.rows[0].id,
-      userId: workspace.owner_user_id,
-      role: body.memberRole || "lead",
-      color: workspace.metadata.userColor
-    });
-  }
+  await ensureMember(result.rows[0].id);
   return result.rows[0];
 }
 
@@ -1634,6 +1665,7 @@ module.exports = {
   releaseLeadLock,
   heartbeatWorkspacePresence,
   listWorkspacePresence,
+  clearWorkspacePresence,
   createDocument,
   recordAnnotationEvent,
   listAnnotationEvents,

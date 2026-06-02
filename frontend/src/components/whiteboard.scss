@@ -850,10 +850,30 @@ div#remove_page:after{
   border-radius: 999px;
 }
 .toolbar-collapse-toggle {
+  position: relative;
   width: 34px;
   height: 34px;
   border-radius: 999px;
   margin: 2px 0 6px;
+
+  &.edit-workspace-toggle {
+    width: 42px;
+    height: 42px;
+    border-color: #eb5e28;
+    background: #eb5e28;
+    color: #fffcf2;
+    box-shadow: 0 16px 42px rgba(235, 94, 40, 0.28);
+
+    &:hover {
+      background: #c94d21;
+      color: #fffcf2;
+    }
+  }
+
+  &:hover .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+  }
 }
 .media-board .menu.toolbar-collapsed {
   min-height: 46px;
@@ -1239,6 +1259,13 @@ div#remove_page:after{
   }
 }
 
+.participant-control-header-actions {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .participant-control-header button,
 .participant-control-actions button {
   min-height: 32px;
@@ -1255,6 +1282,15 @@ div#remove_page:after{
 .participant-control-list {
   display: grid;
   gap: 8px;
+}
+
+.participant-empty-state {
+  margin: 0;
+  padding: 14px;
+  border: 1px dashed rgba(64, 61, 57, 0.24);
+  border-radius: 12px;
+  color: rgba(37, 36, 34, 0.62);
+  font-size: 13px;
 }
 
 .share-control-code,
