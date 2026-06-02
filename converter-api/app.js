@@ -804,12 +804,18 @@ app.post(
     });
     let member = null;
     if (requestUser) {
-      member = await auditStore.addWorkspaceMember({
+      const acceptedInvite = await auditStore.acceptWorkspaceInvite({
         workspaceId: workspace.id,
-        userId: requestUser.id,
-        role: body.memberRole || (workspace.owner_user_id === requestUser.id ? "lead" : "reviewer"),
-        color: body.userColor || metadata.userColor || requestUser.color
+        userId: requestUser.id
       });
+      member = acceptedInvite && acceptedInvite.member
+        ? acceptedInvite.member
+        : await auditStore.addWorkspaceMember({
+            workspaceId: workspace.id,
+            userId: requestUser.id,
+            role: body.memberRole || (workspace.owner_user_id === requestUser.id ? "lead" : "reviewer"),
+            color: body.userColor || metadata.userColor || requestUser.color
+          });
     }
     res.status(201).json({ workspace, member });
   })
@@ -823,9 +829,16 @@ app.post(
     if (workspace.owner_user_id && workspace.owner_user_id !== req.user.id) {
       return res.status(403).json({ error: "Only the lead reviewer can share this workspace." });
     }
+    const invitedUserId = req.body.userId || req.body.user_id || req.body.invitedUserId || req.body.invited_user_id;
+    if (!invitedUserId) {
+      return res.status(400).json({ error: "Select a registered reviewer before sending an invite." });
+    }
+    if (invitedUserId === req.user.id) {
+      return res.status(400).json({ error: "Lead reviewer is already in this workspace." });
+    }
     const invite = await auditStore.inviteWorkspaceUser({
       workspaceId: req.params.id,
-      email: req.body.email,
+      userId: invitedUserId,
       role: req.body.role || "reviewer",
       invitedByUserId: req.user.id
     });

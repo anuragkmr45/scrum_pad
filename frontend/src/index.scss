@@ -1779,10 +1779,51 @@ body.touch-action-disable * {
     color: var(--rustic-carbon);
     text-align: left;
     cursor: pointer;
+
+    &.active {
+      border-color: rgba(235, 94, 40, 0.42);
+      background: rgba(235, 94, 40, 0.11);
+    }
   }
   span {
     color: var(--rustic-ink-soft);
     font-size: 12px;
+  }
+}
+
+.selected-user-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid rgba(235, 94, 40, 0.24);
+  border-radius: 14px;
+  background: rgba(235, 94, 40, 0.08);
+
+  span,
+  small {
+    display: block;
+    color: var(--rustic-ink-soft);
+    font-size: 12px;
+  }
+
+  strong {
+    display: block;
+    margin: 3px 0;
+    color: var(--rustic-carbon);
+    font-size: 15px;
+  }
+
+  button {
+    min-height: 34px;
+    border: 1px solid rgba(64, 61, 57, 0.18);
+    border-radius: 999px;
+    padding: 0 12px;
+    background: rgba(255, 252, 242, 0.72);
+    color: var(--rustic-charcoal);
+    font-weight: 800;
+    cursor: pointer;
   }
 }
 

@@ -1,6 +1,6 @@
 # Deployment
 
-See [03_DEPLOYMENT_VERCEL_RENDER.md](../03_DEPLOYMENT_VERCEL_RENDER.md).
+See [deployment/vercel-render.md](deployment/vercel-render.md).
 
 Use Vercel for the `frontend/` static build and Render or another backend host for `converter-api/`.
 

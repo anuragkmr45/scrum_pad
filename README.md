@@ -110,7 +110,7 @@ Do not put Cloudinary secrets or `DATABASE_URL` in the frontend.
 - Arrow remains an MVP gap unless the upstream line tool is accepted as the temporary substitute.
 - No 40-user or enterprise production readiness has been tested.
 
-See [00_PROJECT_STATUS.md](00_PROJECT_STATUS.md), [01_FEATURE_MAPPING.md](01_FEATURE_MAPPING.md), and [06_REMAINING_GAPS.md](06_REMAINING_GAPS.md) for the full status.
+See [docs/status/project-status.md](docs/status/project-status.md), [docs/product/feature-mapping.md](docs/product/feature-mapping.md), and [docs/status/remaining-gaps.md](docs/status/remaining-gaps.md) for the full status.
 
 ## Attribution
 

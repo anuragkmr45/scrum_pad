@@ -1,6 +1,6 @@
 # Feature Mapping
 
-See [01_FEATURE_MAPPING.md](../01_FEATURE_MAPPING.md).
+See [product/feature-mapping.md](product/feature-mapping.md).
 
 The important current distinction:
 

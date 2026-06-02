@@ -341,7 +341,7 @@ export default function Control({
   const [participantPanelOpen, setParticipantPanelOpen] = useState(false);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberRow[]>([]);
   const [sharePanelOpen, setSharePanelOpen] = useState(false);
-  const [shareEmail, setShareEmail] = useState('');
+  const [selectedShareUser, setSelectedShareUser] = useState<any>(null);
   const [shareSearch, setShareSearch] = useState('');
   const [shareUsers, setShareUsers] = useState<any[]>([]);
   const [shareLink, setShareLink] = useState('');
@@ -552,6 +552,7 @@ export default function Control({
     setSharePanelOpen(true);
     setParticipantPanelOpen(false);
     setShareStatus('');
+    setSelectedShareUser(null);
     setShareLink(currentWorkspaceInviteLink());
   };
 
@@ -560,6 +561,7 @@ export default function Control({
       setShareUsers([]);
       return;
     }
+    setSelectedShareUser(null);
     searchUsers(shareSearch.trim())
       .then((data: any) => setShareUsers(data.users || []))
       .catch((err: any) => setShareStatus(err.message || 'Unable to search users'));
@@ -567,16 +569,16 @@ export default function Control({
 
   const handleInviteReviewer = async () => {
     const workspaceId = currentWorkspaceId();
-    const email = shareEmail.trim();
-    if (!workspaceId || !email) return;
+    if (!workspaceId || !selectedShareUser || !selectedShareUser.id) return;
 
     try {
       await inviteWorkspaceUser(workspaceId, {
-        email,
+        userId: selectedShareUser.id,
         role: 'reviewer',
       });
-      setShareStatus('Invite created. Share this link only with the invited reviewer.');
-      setShareEmail('');
+      setShareStatus(`Invite created for ${selectedShareUser.name || selectedShareUser.email || 'selected reviewer'}.`);
+      setSelectedShareUser(null);
+      setShareSearch('');
       setShareUsers([]);
       setShareLink(currentWorkspaceInviteLink());
       loadParticipants();
@@ -1048,21 +1050,9 @@ export default function Control({
               <strong>{workspaceCodeFromId(currentWorkspaceId())}</strong>
               <small>{roomStore._state.course.roomName || 'Live workspace'}</small>
             </div>
-            <label className="share-control-field">
-              Reviewer email
-              <input
-                value={shareEmail}
-                onChange={(evt: any) => setShareEmail(evt.target.value)}
-                placeholder="reviewer@example.com"
-              />
-            </label>
-            <div className="share-control-actions">
-              <button disabled={!shareEmail.trim()} onClick={handleInviteReviewer}>Send invite</button>
-              <button onClick={copyInRoomShareLink}>Copy link</button>
-            </div>
             <div className="share-control-search">
               <label className="share-control-field">
-                Search users
+                Search registered users
                 <input
                   value={shareSearch}
                   onChange={(evt: any) => setShareSearch(evt.target.value)}
@@ -1071,10 +1061,27 @@ export default function Control({
               </label>
               <button onClick={handleShareUserSearch}>Search</button>
             </div>
+            {selectedShareUser ?
+              <div className="share-selected-user">
+                <div>
+                  <span>Selected reviewer</span>
+                  <strong>{selectedShareUser.name || selectedShareUser.email}</strong>
+                  <small>{selectedShareUser.designation || selectedShareUser.email || 'Registered user'}</small>
+                </div>
+                <button onClick={() => setSelectedShareUser(null)}>Change</button>
+              </div> : null}
+            <div className="share-control-actions">
+              <button disabled={!selectedShareUser} onClick={handleInviteReviewer}>Send invite</button>
+              <button onClick={copyInRoomShareLink}>Copy link</button>
+            </div>
             {shareUsers.length ?
               <div className="share-user-results">
                 {shareUsers.map((user: any) => (
-                  <button key={user.id} onClick={() => setShareEmail(user.email)}>
+                  <button
+                    key={user.id}
+                    className={selectedShareUser && selectedShareUser.id === user.id ? 'active' : ''}
+                    onClick={() => setSelectedShareUser(user)}
+                  >
                     <strong>{user.name}</strong>
                     <span>{user.email}</span>
                   </button>

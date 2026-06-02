@@ -923,6 +923,66 @@ async function acceptPendingInvites(user) {
   return result.rows;
 }
 
+async function acceptWorkspaceInvite(body) {
+  const workspaceId = body.workspaceId || body.workspace_id || "";
+  const userId = body.userId || body.user_id || "";
+  if (!workspaceId || !userId) return null;
+
+  const user = await getUserById(userId);
+  if (!user) return null;
+  const email = normalizeEmail(user.email);
+
+  if (!pool) {
+    const invite = memory.workspace_invites.find(
+      item => item.workspace_id === workspaceId &&
+        item.status !== "blocked" &&
+        (item.invited_user_id === userId || item.invited_email === email)
+    );
+    if (!invite) return null;
+    invite.status = "accepted";
+    invite.accepted_at = invite.accepted_at || nowIso();
+    invite.invited_user_id = userId;
+    const member = await addWorkspaceMember({
+      workspaceId,
+      userId,
+      role: invite.role || "reviewer",
+      invitedByUserId: invite.invited_by_user_id
+    });
+    return { invite, member };
+  }
+
+  const existing = await query(
+    `SELECT *
+     FROM workspace_invites
+     WHERE workspace_id = $1
+       AND status <> 'blocked'
+       AND (invited_user_id = $2 OR invited_email = $3)
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [workspaceId, userId, email]
+  );
+  const invite = existing.rows[0];
+  if (!invite) return null;
+
+  const accepted = await query(
+    `UPDATE workspace_invites
+     SET status = 'accepted',
+         accepted_at = COALESCE(accepted_at, now()),
+         invited_user_id = $2
+     WHERE id = $1
+     RETURNING *`,
+    [invite.id, userId]
+  );
+  const nextInvite = accepted.rows[0];
+  const member = await addWorkspaceMember({
+    workspaceId,
+    userId,
+    role: nextInvite.role || "reviewer",
+    invitedByUserId: nextInvite.invited_by_user_id
+  });
+  return { invite: nextInvite, member };
+}
+
 async function upsertUser(user) {
   if (!user || !user.id) return null;
   const row = {
@@ -1181,45 +1241,69 @@ async function updateWorkspaceMemberStatus(body) {
 
 async function inviteWorkspaceUser(body) {
   const workspaceId = body.workspaceId || body.workspace_id || "";
+  const invitedUserId = body.userId || body.user_id || body.invitedUserId || body.invited_user_id || "";
   const email = normalizeEmail(body.email || body.invitedEmail || body.invited_email);
-  if (!workspaceId || !email) {
-    const err = new Error("workspace_and_email_required");
+  const invitedUser = invitedUserId
+    ? await getUserById(invitedUserId)
+    : email
+      ? await findUserByEmail(email)
+      : null;
+  if (!workspaceId || !invitedUser) {
+    const err = new Error("registered_user_required");
     err.statusCode = 400;
     throw err;
   }
 
-  const invitedUser = await findUserByEmail(email);
+  const invitedEmail = normalizeEmail(invitedUser.email);
   const invite = {
     id: body.id || makeId("inv"),
     workspace_id: workspaceId,
-    invited_email: email,
-    invited_user_id: invitedUser ? invitedUser.id : "",
+    invited_email: invitedEmail,
+    invited_user_id: invitedUser.id,
     invited_by_user_id: body.invitedByUserId || body.invited_by_user_id || "",
     role: body.role || "reviewer",
-    status: invitedUser ? "accepted" : "pending",
+    status: "pending",
     created_at: nowIso(),
-    accepted_at: invitedUser ? nowIso() : null
+    accepted_at: null
   };
-
-  if (invitedUser) {
-    await addWorkspaceMember({
-      workspaceId,
-      userId: invitedUser.id,
-      role: invite.role,
-      invitedByUserId: invite.invited_by_user_id
-    });
-  }
 
   if (!pool) {
     const existing = memory.workspace_invites.find(
-      item => item.workspace_id === workspaceId && item.invited_email === email
+      item => item.workspace_id === workspaceId && item.invited_user_id === invitedUser.id
     );
     if (existing) {
-      Object.assign(existing, invite, { id: existing.id });
+      Object.assign(existing, invite, {
+        id: existing.id,
+        status: existing.status === "accepted" ? "accepted" : "pending",
+        accepted_at: existing.status === "accepted" ? existing.accepted_at : null
+      });
       return existing;
     }
     memory.workspace_invites.push(invite);
     return invite;
+  }
+
+  const existing = await query(
+    `SELECT *
+     FROM workspace_invites
+     WHERE workspace_id = $1 AND invited_user_id = $2
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [workspaceId, invitedUser.id]
+  );
+  if (existing.rows[0]) {
+    const result = await query(
+      `UPDATE workspace_invites
+       SET invited_email = $2,
+           invited_by_user_id = $3,
+           role = $4,
+           status = CASE WHEN status = 'accepted' THEN status ELSE 'pending' END,
+           accepted_at = CASE WHEN status = 'accepted' THEN accepted_at ELSE NULL END
+       WHERE id = $1
+       RETURNING *`,
+      [existing.rows[0].id, invite.invited_email, invite.invited_by_user_id, invite.role]
+    );
+    return result.rows[0];
   }
 
   const result = await query(
@@ -1544,6 +1628,7 @@ module.exports = {
   listWorkspaceMembers,
   updateWorkspaceMemberStatus,
   inviteWorkspaceUser,
+  acceptWorkspaceInvite,
   endWorkspace,
   acquireLeadLock,
   releaseLeadLock,

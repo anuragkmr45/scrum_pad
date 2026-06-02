@@ -1,6 +1,6 @@
 # Setup
 
-See the root [02_LOCAL_SETUP.md](../02_LOCAL_SETUP.md) for the canonical local setup flow.
+See [setup/local-setup.md](setup/local-setup.md) for the canonical local setup flow.
 
 Short version:
 

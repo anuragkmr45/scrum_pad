@@ -161,7 +161,7 @@ function HomePage() {
   const [status, setStatus] = useState<string>('');
   const [backendHealth, setBackendHealth] = useState<any>({ checked: false, ok: true });
   const [shareWorkspace, setShareWorkspace] = useState<WorkspaceRow | null>(null);
-  const [shareEmail, setShareEmail] = useState<string>('');
+  const [selectedShareUser, setSelectedShareUser] = useState<any>(null);
   const [userSearch, setUserSearch] = useState<string>('');
   const [userResults, setUserResults] = useState<any[]>([]);
   const [shareLink, setShareLink] = useState<string>('');
@@ -250,6 +250,7 @@ function HomePage() {
     setWorkspaces([]);
     setInvitations([]);
     setShareWorkspace(null);
+    setSelectedShareUser(null);
     setWorkspaceMembers([]);
     setWorkspaceLoadComplete(false);
     setStatus('Signed out');
@@ -257,6 +258,9 @@ function HomePage() {
 
   const loadWorkspaceMembers = (workspace: WorkspaceRow | null) => {
     setShareWorkspace(workspace);
+    setSelectedShareUser(null);
+    setUserResults([]);
+    setShareLink(workspace ? `${window.location.origin}/?join=${encodeURIComponent(workspace.id)}` : '');
     setWorkspaceMembers([]);
     if (!workspace) return;
     const role = roleForWorkspace(workspace);
@@ -386,14 +390,24 @@ function HomePage() {
   useEffect(() => {
     if (!joinWorkspaceId || !authUser || autoJoinStarted || !workspaceLoadComplete) return;
     const workspace = workspaces.find((item) => item.id === joinWorkspaceId);
-    if (!workspace) {
-      setStatus('This invite link is only available to invited users. Login or register with the invited email.');
+    const invite = invitations.find((item: any) => item.workspace_id === joinWorkspaceId);
+    if (workspace && !canOpenWorkspace(workspace)) {
+      setStatus(workspaceUnavailableReason(workspace) || 'This workspace is not available.');
       return;
     }
-    setAutoJoinStarted(true);
-    launchWorkspace(workspace.name, roleForWorkspace(workspace), workspace.id, workspace.member_color);
+    if (workspace) {
+      setAutoJoinStarted(true);
+      launchWorkspace(workspace.name, roleForWorkspace(workspace), workspace.id, workspace.member_color);
+      return;
+    }
+    if (invite) {
+      setAutoJoinStarted(true);
+      launchWorkspace(invite.workspace_name || `Workspace ${workspaceCodeFromId(invite.workspace_id)}`, 'reviewer', invite.workspace_id);
+      return;
+    }
+    setStatus('This restricted join link is only available to invited users. Login with the invited account or ask the lead reviewer to invite you.');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [joinWorkspaceId, authUser, autoJoinStarted, workspaceLoadComplete, workspaces]);
+  }, [joinWorkspaceId, authUser, autoJoinStarted, workspaceLoadComplete, workspaces, invitations]);
 
   const createGeneratedWorkspace = () => {
     const code = generatedWorkspaceCode || generateWorkspaceCode();
@@ -453,16 +467,17 @@ function HomePage() {
   };
 
   const handleShare = () => {
-    if (!shareWorkspace || !shareEmail.trim()) return;
+    if (!shareWorkspace || !selectedShareUser || !selectedShareUser.id) return;
     inviteWorkspaceUser(shareWorkspace.id, {
-      email: shareEmail.trim(),
+      userId: selectedShareUser.id,
       role: 'reviewer',
     })
       .then(() => {
         const link = `${window.location.origin}/?join=${encodeURIComponent(shareWorkspace.id)}`;
         setShareLink(link);
-        setStatus('Workspace invite created. Share the link only with the invited reviewer.');
-        setShareEmail('');
+        setStatus(`Workspace invite created for ${selectedShareUser.name || selectedShareUser.email || 'selected reviewer'}.`);
+        setSelectedShareUser(null);
+        setUserSearch('');
         setUserResults([]);
         loadWorkspaceMembers(shareWorkspace);
         loadWorkspaces();
@@ -483,6 +498,7 @@ function HomePage() {
 
   const handleUserSearch = () => {
     if (!userSearch.trim()) return;
+    setSelectedShareUser(null);
     searchUsers(userSearch.trim())
       .then((data: any) => setUserResults(data.users || []))
       .catch((err: any) => setStatus(err.message));
@@ -535,8 +551,13 @@ function HomePage() {
         <p className="workspace-card-helper">
           {isAccepted
             ? 'This invite has been accepted. Open the workspace from Previous or Joined when access is active.'
-            : 'Login with the invited email to accept access. Until then the workspace remains not joined.'}
+            : 'Login with the invited account to accept access. Until then the workspace remains not joined.'}
         </p>
+        <div className="workspace-card-actions">
+          <button onClick={() => launchWorkspace(invite.workspace_name || `Workspace ${workspaceCodeFromId(invite.workspace_id)}`, 'reviewer', invite.workspace_id)}>
+            {isAccepted ? 'Open workspace' : 'Join workspace'}
+          </button>
+        </div>
       </article>
     );
   };
@@ -587,7 +608,7 @@ function HomePage() {
             </>
           ) : null}
           {status ? <p className="auth-status">{status}</p> : null}
-          {joinWorkspaceId ? <p className="auth-status">Use the invited email to login or create an account for this workspace link.</p> : null}
+          {joinWorkspaceId ? <p className="auth-status">Login with the invited account to open this restricted workspace link.</p> : null}
           {!hasConverterUrl ? <p className="auth-status">Missing converter API URL. Auth needs REACT_APP_LIBRE_BACKEND_URL.</p> : null}
           <Button name={authMode === 'login' ? 'Login' : 'Create account'} onClick={handleAuthSubmit} />
         </section>
@@ -646,7 +667,7 @@ function HomePage() {
             {!hasAgoraAppId ? <p>Missing Agora App ID. Live collaboration is disabled.</p> : null}
             {!hasConverterUrl ? <p>Missing converter URL. Upload, auth, and reports need the backend.</p> : null}
             {hasConverterUrl && backendHealth.checked && !backendHealth.ok ? <p>Backend health check failed.</p> : null}
-            {pendingInviteCount ? <p>{pendingInviteCount} pending invite will appear after the invited account logs in.</p> : null}
+            {pendingInviteCount ? <p>{pendingInviteCount} pending invite is waiting for the selected reviewer account.</p> : null}
           </div>
           {status ? <p className="dashboard-status">{status}</p> : null}
         </section>
@@ -713,7 +734,7 @@ function HomePage() {
             })}
                 {visibleInvitations.map(renderInvitationCard)}
               </>
-            ) : <p className="empty-state">{workspaceTab === 'joined' ? 'No active joined workspaces yet.' : 'No saved workspace yet. Create one or ask the lead reviewer to share it with your email.'}</p>}
+            ) : <p className="empty-state">{workspaceTab === 'joined' ? 'No active joined workspaces yet.' : 'No saved workspace yet. Create one or ask the lead reviewer to invite your account.'}</p>}
           </div>
         </section>
 
@@ -731,30 +752,40 @@ function HomePage() {
               <small>Access is still limited to invited users.</small>
             </div>
           ) : null}
-          <label>
-            Reviewer email
-            <input value={shareEmail} onChange={(evt: any) => setShareEmail(evt.target.value)} />
-          </label>
-          <div className="dashboard-actions">
-            <button disabled={!shareWorkspace || !shareEmail.trim()} onClick={handleShare}>Send invite</button>
-          </div>
           {shareLink ? (
             <div className="invite-link-box">
-              <span>Reviewer join link</span>
+              <span>Restricted join link</span>
               <input value={shareLink} readOnly />
               <button onClick={copyShareLink}>Copy link</button>
             </div>
           ) : null}
           <div className="user-search-box">
             <label>
-              Search previous users
+              Search registered users
               <input value={userSearch} onChange={(evt: any) => setUserSearch(evt.target.value)} />
             </label>
             <button onClick={handleUserSearch}>Search</button>
           </div>
+          {selectedShareUser ? (
+            <div className="selected-user-card">
+              <div>
+                <span>Selected reviewer</span>
+                <strong>{selectedShareUser.name || selectedShareUser.email}</strong>
+                <small>{selectedShareUser.designation || selectedShareUser.email || 'Registered user'}</small>
+              </div>
+              <button onClick={() => setSelectedShareUser(null)}>Change</button>
+            </div>
+          ) : null}
+          <div className="dashboard-actions">
+            <button disabled={!shareWorkspace || !selectedShareUser} onClick={handleShare}>Send invite</button>
+          </div>
           <div className="user-result-list">
             {userResults.map((user) => (
-              <button key={user.id} onClick={() => setShareEmail(user.email)}>
+              <button
+                key={user.id}
+                className={selectedShareUser && selectedShareUser.id === user.id ? 'active' : ''}
+                onClick={() => setSelectedShareUser(user)}
+              >
                 <strong>{user.name}</strong>
                 <span>{user.email}</span>
               </button>
