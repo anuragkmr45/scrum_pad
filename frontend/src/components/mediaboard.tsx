@@ -233,6 +233,30 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
   const scrollSyncTimer = useRef<number | null>(null);
   const lastScrollSentAt = useRef(0);
 
+  const updateBoardScale = () => {
+    const board = document.getElementById('Board') as HTMLElement | null;
+    if (!board) return;
+
+    const activeViewer = board.querySelector('.pdfViewer.active') as HTMLElement | null;
+    const activePage = activeViewer && activeViewer.querySelector('.page') as HTMLElement | null;
+    const pageWidth = activePage
+      ? Number(activePage.getAttribute('data-pdf-width')) || activePage.offsetWidth
+      : 0;
+    const boardWidth = board.clientWidth || window.innerWidth;
+    const compact = window.matchMedia('(max-width: 1180px)').matches;
+    const verySmall = window.matchMedia('(max-width: 680px)').matches;
+    const leftGutter = compact ? (verySmall ? 78 : 98) : 126;
+    const rightGutter = compact ? (verySmall ? 18 : 34) : 72;
+    const availableWidth = Math.max(260, boardWidth - leftGutter - rightGutter);
+    const scale = compact && pageWidth
+      ? Math.min(1, Math.max(0.52, availableWidth / pageWidth))
+      : 1;
+
+    board.style.setProperty('--hexscrum-board-scale', scale.toFixed(3));
+    board.style.setProperty('--hexscrum-board-left-gutter', `${leftGutter}px`);
+    board.style.setProperty('--hexscrum-board-right-gutter', `${rightGutter}px`);
+  };
+
   useEffect(() => {
     const sharedFiles = [
       ...parseSharedUploadedFiles(roomState.course.boardId),
@@ -248,6 +272,42 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
   useEffect(() => {
     setCurrentPage(1);
   },[pdfFiles]);
+
+  useEffect(() => {
+    updateBoardScale();
+    const board = document.getElementById('Board');
+    if (!board) return undefined;
+
+    const ResizeObserverCtor = (window as any).ResizeObserver;
+    const resizeObserver = ResizeObserverCtor
+      ? new ResizeObserverCtor(() => updateBoardScale())
+      : null;
+    resizeObserver && resizeObserver.observe(board);
+
+    const mutationObserver = new MutationObserver(() => {
+      window.requestAnimationFrame(updateBoardScale);
+    });
+    mutationObserver.observe(board, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['class', 'data-pdf-width', 'style'],
+    });
+
+    const onResize = () => updateBoardScale();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    const timer = window.setTimeout(updateBoardScale, 350);
+
+    return () => {
+      resizeObserver && resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfFiles.length, currentPage, location.pathname]);
 
   useEffect(() => {
     // disable all pdf effect on grandboard false

@@ -3,16 +3,24 @@
   padding: 0 14px;
   height: 52px;
   box-sizing: border-box;
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(96px, 1fr) auto minmax(96px, 1fr);
+  grid-template-areas: "network title actions";
+  column-gap: 10px;
   align-items: center;
   background-color: #252422;
   border-bottom: 1px solid rgba(255, 252, 242, 0.12);
   box-shadow: 0 8px 24px rgba(37, 36, 34, 0.18);
 
   .class-title {
+    grid-area: title;
+    position: static;
+    top: auto;
+    width: auto;
     display: flex;
     align-items: center;
+    justify-content: center;
+    justify-self: center;
     min-width: 0;
   }
 
@@ -79,17 +87,23 @@
   }
   
   .network-state {
+    grid-area: network;
+    justify-self: start;
     padding: 0;
+    min-width: 0;
   }
 
   .menu {
+    grid-area: actions;
+    justify-self: end;
     position: relative;
     z-index: 3;
     display: flex;
     align-items: center;
+    min-width: 0;
     .btn-group {
       display: flex;
-      min-width: 72px;
+      min-width: 42px;
       justify-content: space-between;
     }
     .electron-btn-group {
@@ -155,13 +169,50 @@
 @media screen and (max-width: 900px) {
   .nav-container {
     padding: 0 10px;
+    grid-template-columns: minmax(58px, 0.8fr) minmax(0, auto) minmax(84px, 0.8fr);
 
     .room-name {
-      max-width: 30vw;
+      max-width: 26vw;
     }
 
     .network-state .net-field:first-child {
       display: none;
+    }
+  }
+}
+
+@media screen and (max-width: 680px) {
+  .nav-container {
+    grid-template-columns: minmax(34px, 0.55fr) minmax(0, auto) minmax(70px, 0.65fr);
+    column-gap: 6px;
+
+    .room-name {
+      max-width: 22vw;
+      font-size: 12px;
+    }
+
+    .MuiButtonBase-root.nav-button.start,
+    .MuiButtonBase-root.nav-button.stop {
+      width: 94px;
+      height: 28px;
+      margin-left: 6px;
+
+      .MuiButton-label {
+        font-size: 12px;
+      }
+    }
+
+    .network-state .net-field {
+      margin-right: 0;
+    }
+
+    .network-state .net-field-container {
+      font-size: 0;
+    }
+
+    .timer {
+      max-width: 66px;
+      min-width: 66px;
     }
   }
 }

@@ -12,7 +12,10 @@
 }
 
 .classroom {
+  width: 100%;
+  min-width: 0;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 
   .room-container {
@@ -20,6 +23,7 @@
     flex: 1;
     min-height: 0;
     height: calc(100vh - 52px);
+    height: calc(100dvh - 52px);
     overflow: hidden;
 
     .whiteboard {
@@ -58,8 +62,11 @@
 
 @media screen and (max-width: 1180px) {
   .classroom {
+    min-width: 0;
+
     .room-container {
       height: calc(100vh - 52px);
+      height: calc(100dvh - 52px);
     }
   }
 }
