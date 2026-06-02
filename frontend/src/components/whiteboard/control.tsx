@@ -30,7 +30,6 @@ import KeyboardArrowDownIcon from '@material-ui/icons/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@material-ui/icons/KeyboardArrowUp';
 import PeopleIcon from '@material-ui/icons/People';
 import ShareIcon from '@material-ui/icons/Share';
-import ExitToAppIcon from '@material-ui/icons/ExitToApp';
 import { undoAnnotations, redoAnnotations, getAnnotationHistoryState, addHistoryStateListener } from '../../utils/annotation-history';
 import { getHexscrumProfile, getWorkspaceId, getWorkspacePresence, inviteWorkspaceUser, listWorkspaceMembers, searchUsers, updateWorkspaceMemberStatus, workspaceJoinLink } from '../../utils/hexscrum-api';
 
@@ -738,13 +737,6 @@ export default function Control({
     }
   };
 
-  const leaveWorkspace = () => {
-    globalStore.showDialog({
-      type: 'exitRoom',
-      message: t('toast.quit_room'),
-    });
-  };
-
   const toggleExportCanvas = (canvasId: string) => {
     setSelectedExportCanvasIds((current) => {
       if (current.includes(canvasId)) {
@@ -1070,11 +1062,6 @@ export default function Control({
                 <ShareIcon onClick={openSharePanel} />
                 <span className="tooltiptext">Share workspace</span>
               </div> : null}
-            <div className='control-button leave-workspace-control'>
-              <ExitToAppIcon onClick={leaveWorkspace} />
-              <span className="tooltiptext">Leave workspace</span>
-              <span className="leave-workspace-label">Leave</span>
-            </div>
             {
               role === 'teacher' ?
                 (
