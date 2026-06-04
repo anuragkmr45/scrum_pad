@@ -26,6 +26,9 @@ import FiberManualRecordIcon from '@material-ui/icons/FiberManualRecord';
 import UndoIcon from '@material-ui/icons/Undo';
 import RedoIcon from '@material-ui/icons/Redo';
 import RotateRightIcon from '@material-ui/icons/RotateRight';
+import RotateLeftIcon from '@material-ui/icons/RotateLeft';
+import ZoomInIcon from '@material-ui/icons/ZoomIn';
+import ZoomOutIcon from '@material-ui/icons/ZoomOut';
 import KeyboardArrowDownIcon from '@material-ui/icons/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@material-ui/icons/KeyboardArrowUp';
 import PeopleIcon from '@material-ui/icons/People';
@@ -120,6 +123,17 @@ function syncPresentationPageAfterCanvasChange(pageNumber: number = 1) {
   window.setTimeout(() => pageSync(pageNumber), 80);
 }
 
+function resetBoardScrollAfterCanvasChange() {
+  const board = document.getElementById('Board') as HTMLElement | null;
+  if (!board) return;
+  (window as any).__hexscrumApplyingRemoteScroll = true;
+  board.scrollTop = 0;
+  board.scrollLeft = 0;
+  window.setTimeout(() => {
+    (window as any).__hexscrumApplyingRemoteScroll = false;
+  }, 120);
+}
+
 export const toggleNext = (
   setCanvasNumber?: any,
   pdfFiles: any = [],
@@ -157,6 +171,7 @@ export const toggleNext = (
       let totalPages = next?.childElementCount;
       setTotalPages(totalPages)
     }
+    resetBoardScrollAfterCanvasChange();
     syncPresentationPageAfterCanvasChange(1);
   }
 }
@@ -200,6 +215,7 @@ export const togglePrev = (
       let totalPages = previous?.childElementCount;
       setTotalPages(totalPages)
     }
+    resetBoardScrollAfterCanvasChange();
     syncPresentationPageAfterCanvasChange(1);
 
   }
@@ -268,6 +284,7 @@ export const toggleFirstLast = (
       setTotalPages(totalPages)
     }
   }
+  resetBoardScrollAfterCanvasChange();
   syncPresentationPageAfterCanvasChange(item === 'last' ? targetTotalPages : 1);
 }
 
@@ -473,6 +490,40 @@ export default function Control({
   const canManageCanvas = canManageWorkspace;
   const canExportWorkspace = canAnnotate || canManageWorkspace;
   const presentationMode = Boolean(isPresentationMode || fileState.isPresentationMode);
+  const viewerZoom = Math.min(2.75, Math.max(0.5, Number(fileState.viewerZoom) || 1));
+  const viewerRotation = ((Number(fileState.viewerRotation) || 0) % 360 + 360) % 360;
+
+  const refreshBoardScale = () => {
+    if (typeof (window as any).__hexscrumUpdateBoardScale === 'function') {
+      (window as any).__hexscrumUpdateBoardScale();
+    }
+  };
+
+  const setLiveViewerZoom = (nextZoom: number) => {
+    const roundedZoom = Math.round(Math.min(2.75, Math.max(0.5, nextZoom)) * 100) / 100;
+    if (typeof fileState.setViewerZoom === 'function') {
+      fileState.setViewerZoom(roundedZoom);
+      window.setTimeout(refreshBoardScale, 0);
+    }
+  };
+
+  const setLiveViewerRotation = (nextRotation: number) => {
+    const normalizedRotation = ((nextRotation % 360) + 360) % 360;
+    if (typeof fileState.setViewerRotation === 'function') {
+      fileState.setViewerRotation(normalizedRotation);
+    }
+    const rotateActivePdf = (window as any).__hexscrumRotateActivePdfView;
+    if (typeof rotateActivePdf === 'function') {
+      const didRotate = rotateActivePdf(normalizedRotation);
+      if (!didRotate) {
+        globalStore.showToast({
+          type: 'notice-board',
+          message: 'Rotate view is available after uploading a document.',
+        });
+      }
+    }
+    window.setTimeout(refreshBoardScale, 160);
+  };
 
   useEffect(() => {
     const removeListener = addHistoryStateListener((event: any) => {
@@ -1300,6 +1351,35 @@ export default function Control({
                       <span className="tooltiptext">Remove Canvas</span>
                     </div> : null
                 }
+                <div className="menu-split" style={{ marginLeft: '7px', marginRight: '7px' }}></div>
+              </> : null
+            }
+            {canManageWorkspace ?
+              <>
+                <div className="control-button">
+                  <ZoomOutIcon onClick={() => setLiveViewerZoom(viewerZoom - 0.25)} />
+                  <span className="tooltiptext">Zoom out document</span>
+                </div>
+                <button
+                  type="button"
+                  className="current_zoom"
+                  onClick={() => setLiveViewerZoom(1)}
+                  aria-label="Reset document zoom"
+                >
+                  {Math.round(viewerZoom * 100)}%
+                </button>
+                <div className="control-button">
+                  <ZoomInIcon onClick={() => setLiveViewerZoom(viewerZoom + 0.25)} />
+                  <span className="tooltiptext">Zoom in document</span>
+                </div>
+                <div className="control-button">
+                  <RotateLeftIcon onClick={() => setLiveViewerRotation(viewerRotation - 90)} />
+                  <span className="tooltiptext">Rotate left</span>
+                </div>
+                <div className="control-button">
+                  <RotateRightIcon onClick={() => setLiveViewerRotation(viewerRotation + 90)} />
+                  <span className="tooltiptext">Rotate right</span>
+                </div>
                 <div className="menu-split" style={{ marginLeft: '7px', marginRight: '7px' }}></div>
               </> : null
             }

@@ -232,6 +232,8 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPage, setTotalPages] = useState(1);
   const [presentationMode, setPresentationMode] = useState(false);
+  const [viewerZoom, setViewerZoom] = useState(1);
+  const [viewerRotation, setViewerRotation] = useState(0);
   const currentPageRef = useRef(currentPage);
   const presentationModeRef = useRef(presentationMode);
   const scrollSyncTimer = useRef<number | null>(null);
@@ -263,6 +265,17 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
     }
   };
 
+  const resetBoardScroll = () => {
+    const board = document.getElementById('Board') as HTMLElement | null;
+    if (!board) return;
+    (window as any).__hexscrumApplyingRemoteScroll = true;
+    board.scrollTop = 0;
+    board.scrollLeft = 0;
+    window.setTimeout(() => {
+      (window as any).__hexscrumApplyingRemoteScroll = false;
+    }, 120);
+  };
+
   const updateBoardScale = () => {
     const board = document.getElementById('Board') as HTMLElement | null;
     if (!board) return;
@@ -291,11 +304,13 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
       : compact ? (verySmall ? 18 : 34) : 72;
     const availableWidth = Math.max(260, boardWidth - leftGutter - rightGutter);
     const availableHeight = Math.max(260, boardHeight - (presentationMode ? 190 : 0));
-    const scale = presentationMode && pageWidth && pageHeight
+    const fitScale = presentationMode && pageWidth && pageHeight
       ? Math.min(1, Math.max(0.42, Math.min(availableWidth / pageWidth, availableHeight / pageHeight)))
       : compact && pageWidth
         ? Math.min(1, Math.max(0.52, availableWidth / pageWidth))
         : 1;
+    const manualZoom = Math.min(2.75, Math.max(0.5, Number(viewerZoom) || 1));
+    const scale = Math.min(2.75, Math.max(0.3, fitScale * manualZoom));
 
     board.style.setProperty('--hexscrum-board-scale', scale.toFixed(3));
     board.style.setProperty('--hexscrum-board-left-gutter', `${leftGutter}px`);
@@ -341,7 +356,22 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
 
   useEffect(() => {
     setCurrentPage(1);
+    setViewerRotation(0);
+    window.requestAnimationFrame(() => {
+      resetBoardScroll();
+      updatePresentationPageClass(1);
+      updateBoardScale();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   },[pdfFiles]);
+
+  useEffect(() => {
+    (window as any).__hexscrumUpdateBoardScale = () => window.requestAnimationFrame(updateBoardScale);
+    return () => {
+      delete (window as any).__hexscrumUpdateBoardScale;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewerZoom, presentationMode, currentPage, totalPage, pdfFiles.length]);
 
   useEffect(() => {
     currentPageRef.current = currentPage;
@@ -397,7 +427,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
       document.body.classList.remove('hexscrum-presentation-active');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presentationMode, currentPage, totalPage, pdfFiles.length]);
+  }, [presentationMode, currentPage, totalPage, pdfFiles.length, viewerZoom]);
 
   useEffect(() => {
     updateBoardScale();
@@ -529,7 +559,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
 }
 
   return (
-    <div id='Board' className={`media-board ${drawable} ${presentationMode ? 'presentation-mode' : ''}`} onScroll={handleScroll}>
+    <div id='Board' className={`media-board ${drawable} ${presentationMode ? 'presentation-mode' : ''} ${viewerZoom > 1.01 ? 'viewer-zoomed' : ''}`} onScroll={handleScroll}>
       <div className="presentation-status-bar" aria-hidden={!presentationMode}>
         <span className="presentation-kicker">Slideshow</span>
         <strong>{roomStore.state.course.roomName || 'Workspace'}</strong>
@@ -564,6 +594,10 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
         currentPage,
         totalPage,
         setCurrentPage,
+        viewerZoom,
+        setViewerZoom,
+        viewerRotation,
+        setViewerRotation,
         isPresentationMode: presentationMode,
         setPresentationMode,
       }}>

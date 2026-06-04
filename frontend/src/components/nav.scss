@@ -1,5 +1,7 @@
 
 .nav-container {
+  position: relative;
+  z-index: 80;
   padding: 0 14px;
   height: 52px;
   box-sizing: border-box;
@@ -120,6 +122,12 @@
       justify-content: space-between;
     }
   }
+}
+
+body.hexscrum-presentation-active .nav-container {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-52px);
 }
 
 .leave-workspace-nav {

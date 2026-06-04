@@ -94,11 +94,29 @@ def apply_grid_profile(doc):
         else:
             page_style = page_styles.getByName("Default")
 
+        used_columns = end_col + 1
+        landscape = used_columns >= 6
+        pages_wide = 1
+        if used_columns > 28:
+            pages_wide = 3
+        elif used_columns > 14:
+            pages_wide = 2
+
         set_property(page_style, "PrintGrid", True)
         set_property(page_style, "PrintHeaders", True)
-        set_property(page_style, "ScaleToPagesX", 1)
+        set_property(page_style, "LeftMargin", 500)
+        set_property(page_style, "RightMargin", 500)
+        set_property(page_style, "TopMargin", 700)
+        set_property(page_style, "BottomMargin", 700)
+        set_property(page_style, "IsLandscape", landscape)
+        if landscape:
+            set_property(page_style, "Width", 29700)
+            set_property(page_style, "Height", 21000)
+        else:
+            set_property(page_style, "Width", 21000)
+            set_property(page_style, "Height", 29700)
+        set_property(page_style, "ScaleToPagesX", pages_wide)
         set_property(page_style, "ScaleToPagesY", 0)
-        set_property(page_style, "IsLandscape", end_col >= 8)
 
 
 def main():

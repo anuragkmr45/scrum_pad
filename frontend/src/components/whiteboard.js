@@ -18,6 +18,17 @@ import { addSnapshotAppliedListener } from '../utils/annotation-history';
 
 const rtmClient = roomStore.rtmClient;
 
+const resetBoardScroll = () => {
+  const board = document.getElementById("Board");
+  if (!board) return;
+  window.__hexscrumApplyingRemoteScroll = true;
+  board.scrollTop = 0;
+  board.scrollLeft = 0;
+  window.setTimeout(() => {
+    window.__hexscrumApplyingRemoteScroll = false;
+  }, 120);
+};
+
 export const sendToRemote = async (
   annotations,
   documentId,
@@ -274,6 +285,7 @@ const Whiteboard = () => {
         .getElementsByClassName("pdfViewer active")[0]
         .classList.remove("active");
       document.getElementById(elementId).classList.add("active");
+      resetBoardScroll();
     } else {
       PDFJSAnnotate.getStoreAdapter().resetAnnotation(
         document
@@ -289,7 +301,7 @@ const Whiteboard = () => {
       documentId: data,
       pdfDocument: null,
       scale: 1,
-      rotate: 0,
+      rotate: Number(fileState.viewerRotation) || 0,
       count: elementId,
     };
     getDocument(RENDER_OPTIONS.documentId).promise
@@ -312,6 +324,57 @@ const Whiteboard = () => {
 
     PDFJSAnnotate.setStoreAdapter(new PDFJSAnnotate.LocalStoreAdapter());
   };
+
+  const renderActivePdfView = (rotation = 0) => {
+    const { UI } = PDFJSAnnotate;
+    const activeViewer = document.querySelector(".pdfViewer.active");
+    if (!activeViewer || !activeViewer.id) return false;
+
+    const documentId = activeViewer.id.replace("viewerContainer", "");
+    if (!documentId || parseInt(documentId, 10)) return false;
+
+    const normalizedRotation = ((Number(rotation) || 0) % 360 + 360) % 360;
+    activeViewer.setAttribute("data-view-rotation", `${normalizedRotation}`);
+    activeViewer.innerHTML = "";
+    resetBoardScroll();
+
+    const renderOptions = {
+      documentId,
+      pdfDocument: null,
+      scale: 1,
+      rotate: normalizedRotation,
+      count: activeViewer.id,
+    };
+
+    getDocument(documentId).promise
+      .then((pdf) => {
+        fileState.setTotalPages(pdf.numPages);
+        renderOptions.pdfDocument = pdf;
+        for (let i = 1; i <= pdf.numPages; i++) {
+          activeViewer.appendChild(UI.createPage(i));
+          UI.renderPage(i, renderOptions);
+        }
+        const pageNumber = Math.max(1, Number(fileState.currentPage) || 1);
+        window.setTimeout(() => {
+          if (typeof window.__hexscrumSetPresentationPage === "function") {
+            window.__hexscrumSetPresentationPage(pageNumber);
+          }
+          if (typeof window.__hexscrumUpdateBoardScale === "function") {
+            window.__hexscrumUpdateBoardScale();
+          }
+        }, 160);
+      })
+      .catch(() => {});
+
+    return true;
+  };
+
+  useEffect(() => {
+    window.__hexscrumRotateActivePdfView = renderActivePdfView;
+    return () => {
+      delete window.__hexscrumRotateActivePdfView;
+    };
+  });
   useEffect(() => {
       PDFJSAnnotate.getStoreAdapter().addEvent(
         "annotation:added",

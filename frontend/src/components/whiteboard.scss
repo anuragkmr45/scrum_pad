@@ -413,6 +413,23 @@
       justify-content: center;
       align-items: center;
     }
+    .current_zoom {
+      min-width: 56px;
+      height: 30px;
+      border: 0;
+      border-radius: 18px;
+      background: rgba(235, 94, 40, 0.12);
+      color: #252422;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 850;
+      line-height: 18px;
+      padding: 0 10px;
+      white-space: nowrap;
+    }
+    .current_zoom:hover {
+      background: rgba(235, 94, 40, 0.22);
+    }
     svg {
       color: #403d39;
       line-height: normal;
@@ -570,6 +587,10 @@ div.media-board{
   --hexscrum-board-scale: 1;
   --hexscrum-board-left-gutter: 126px;
   --hexscrum-board-right-gutter: 72px;
+}
+
+div.media-board.viewer-zoomed {
+  overflow-x: auto;
 }
 
 .media-board>div {
