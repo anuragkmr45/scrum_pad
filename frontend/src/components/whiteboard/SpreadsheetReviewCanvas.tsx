@@ -393,6 +393,23 @@ const SpreadsheetReviewCanvas: React.FC<SpreadsheetReviewCanvasProps> = ({ meta,
     return save;
   };
 
+  useEffect(() => {
+    const handler = (event: any) => {
+      const detail = event.detail || {};
+      if (detail.documentId && String(detail.documentId) !== String(meta.documentId)) return;
+      if (!activeSheet.id) return;
+      commitOperation({
+        layer: 'overlay',
+        type: 'clearOverlays',
+        sheetId: activeSheet.id,
+      });
+    };
+    window.addEventListener('hexscrum:clear-spreadsheet-overlays', handler);
+    return () => window.removeEventListener('hexscrum:clear-spreadsheet-overlays', handler);
+  // Rebind when the active sheet changes so the sidebar clear action targets the visible sheet.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSheet.id, meta.documentId]);
+
   const selectedCell = (activeSheet.cells && activeSheet.cells[cellKey(selection.row, selection.col)]) || {};
   const rowCount = Math.max(1, Math.min(400, Number(activeSheet.rowCount) || 1));
   const columnCount = Math.max(1, Math.min(80, Number(activeSheet.columnCount) || 1));

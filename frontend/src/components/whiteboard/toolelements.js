@@ -197,11 +197,18 @@ const Toolelements = () => {
 
 
   const clearCurrentCanvasAnnotations = async () => {
-    setClearModalOpen(false);
-
     try {
+      setClearModalOpen(false);
       const activeViewer = document.querySelector("div.pdfViewer.active");
       if (!activeViewer) return;
+
+      const activeSpreadsheet = activeViewer.querySelector(".spreadsheet-review-canvas");
+      if (activeSpreadsheet) {
+        const spreadsheetDocumentId = activeSpreadsheet.getAttribute("data-document-id");
+        window.dispatchEvent(new CustomEvent("hexscrum:clear-spreadsheet-overlays", {
+          detail: { documentId: spreadsheetDocumentId },
+        }));
+      }
 
       const annotationLayers = Array.from(
         activeViewer.querySelectorAll("svg.customAnnotationLayer")
@@ -217,6 +224,10 @@ const Toolelements = () => {
       annotationLayers.forEach(function (item) {
         item.innerHTML = "";
       });
+      const editOverlay = document.getElementById("pdf-annotate-edit-overlay");
+      if (editOverlay && editOverlay.parentNode) {
+        editOverlay.parentNode.removeChild(editOverlay);
+      }
 
       const storeAdapter = PDFJSAnnotate.getStoreAdapter();
       if (!storeAdapter || !storeAdapter.resetAnnotation || !documentIds.length) {
@@ -230,11 +241,23 @@ const Toolelements = () => {
       );
     } catch (error) {
       // The modal has already closed; leave the canvas usable if a stale DOM node was hit.
+    } finally {
+      setClearModalOpen(false);
     }
   };
 
-  const handleClearClick = () => {
+  const handleClearClick = (event) => {
+    event && event.preventDefault();
+    event && event.stopPropagation();
+    setColorPicker(false);
+    setSizePicker(false);
     setClearModalOpen(true);
+  };
+
+  const closeClearModal = (event) => {
+    event && event.preventDefault();
+    event && event.stopPropagation();
+    setClearModalOpen(false);
   };
   const getPickerPosition = (event, width = 240, height = 320) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -642,18 +665,34 @@ const Toolelements = () => {
           tabIndex={-1}
           aria-hidden="true"
         /> : null}
-      {clearModalOpen ?
-        <div className="clear-modal-backdrop" role="presentation" onClick={() => setClearModalOpen(false)}>
-          <div className="clear-modal-panel" role="dialog" aria-modal="true" aria-labelledby="clearAnnotationsTitle" onClick={(event) => event.stopPropagation()}>
+      {clearModalOpen && popoverRoot ? ReactDOM.createPortal(
+        <div
+          className="clear-modal-backdrop"
+          role="presentation"
+          onClick={closeClearModal}
+          onMouseDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <div
+            className="clear-modal-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="clearAnnotationsTitle"
+            onClick={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
             <span>Clear annotations</span>
             <h2 id="clearAnnotationsTitle">Clear the current canvas?</h2>
             <p>This removes all annotations on the active canvas for everyone in the workspace. Uploaded documents stay available.</p>
             <div className="clear-modal-actions">
-              <button type="button" onClick={() => setClearModalOpen(false)}>Cancel</button>
+              <button type="button" onClick={closeClearModal}>Cancel</button>
               <button type="button" className="danger" onClick={clearCurrentCanvasAnnotations}>Clear all</button>
             </div>
           </div>
-        </div> : null}
+        </div>,
+        popoverRoot
+      ) : null}
       {uploadStatus ?
         <div className="upload-progress-overlay" role="status" aria-live="polite">
           <div className="upload-progress-card">
