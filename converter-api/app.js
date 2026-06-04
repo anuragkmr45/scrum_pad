@@ -51,6 +51,8 @@ const cloudinaryConfigured = Boolean(
       process.env.CLOUDINARY_API_KEY &&
       process.env.CLOUDINARY_API_SECRET)
 );
+const cloudinaryPublicPdfDelivery =
+  String(process.env.CLOUDINARY_PUBLIC_PDF_DELIVERY || "").toLowerCase() === "true";
 
 function cloudinaryConfigFromEnv() {
   if (
@@ -312,6 +314,18 @@ function publicFileUrl(req, fileName) {
   const proto = req.get("x-forwarded-proto") || req.protocol || "http";
   const host = req.get("host");
   return `${proto}://${host}/files/${encodeURIComponent(fileName)}`;
+}
+
+function cloudinaryRawFileUrl(fileName) {
+  const cloudName = cloudinaryRuntimeConfig && cloudinaryRuntimeConfig.cloud_name;
+  if (!cloudName || !fileName) return "";
+  const folder = String(cloudinaryFolder || "")
+    .split("/")
+    .map(part => encodeURIComponent(part))
+    .join("/");
+  const encodedFileName = encodeURIComponent(path.basename(fileName));
+  const folderPrefix = folder ? `${folder}/` : "";
+  return `https://res.cloudinary.com/${encodeURIComponent(cloudName)}/raw/upload/${folderPrefix}${encodedFileName}`;
 }
 
 function deleteFile(filepath) {
@@ -705,6 +719,18 @@ app.use(
     }
   })
 );
+app.get("/files/:fileName", function(req, res) {
+  if (!cloudinaryPublicPdfDelivery) {
+    return res.status(404).send(`Cannot GET /files/${req.params.fileName}`);
+  }
+  const fallbackUrl = cloudinaryRawFileUrl(req.params.fileName);
+  if (!fallbackUrl) {
+    return res.status(404).send(`Cannot GET /files/${req.params.fileName}`);
+  }
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  return res.redirect(302, fallbackUrl);
+});
 app.use(express.json({ limit: "1mb" }));
 app.use(
   fileUpload({
@@ -904,6 +930,10 @@ app.post(
       return res.status(413).json({ error: `Filesize should not be more than ${maxUploadMb} MB` });
     }
 
+    if (!sampleFile.size) {
+      return res.status(400).json({ error: "Uploaded file is empty. Re-select the document and upload again." });
+    }
+
     const safeName = path.basename(sampleFile.name || "upload").replace(/[^\w.-]/g, "_");
     const ext = path.extname(safeName).toLowerCase();
     if (!allowedExtensions.has(ext)) {
@@ -943,6 +973,7 @@ app.post(
               sourceExtension: prepared.sourceExtension,
               csvDelimiter: prepared.csvDelimiter || "",
               storageProvider,
+              backendFileUrl: servedPdfUrl,
               cloudinaryUrl: upload.secure_url || upload.url,
               cloudinaryPublicId: upload.publicId || "",
               originalMimeType: sampleFile.mimetype || "",
@@ -956,6 +987,7 @@ app.post(
         url: servedPdfUrl,
         secure_url: servedPdfUrl,
         cloudinary_url: upload.secure_url || upload.url,
+        backend_file_url: servedPdfUrl,
         storageProvider: `${upload.provider}+backend-files`,
         originalName: safeName,
         mimeType: sampleFile.mimetype || "",

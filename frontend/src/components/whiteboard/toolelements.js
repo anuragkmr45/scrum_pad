@@ -183,19 +183,41 @@ const Toolelements = () => {
   }
 
 
-  const clearCurrentCanvasAnnotations = () => {
-    let annotationLayers = document.querySelectorAll(
-      "div.pdfViewer.active svg.customAnnotationLayer"
-    );
-    annotationLayers.forEach(function (item) {
-      item.innerHTML = "";
-    });
-    PDFJSAnnotate.getStoreAdapter().resetAnnotation(
-      document
-        .querySelector("div.pdfViewer.active svg.customAnnotationLayer")
-        .getAttribute("data-pdf-annotate-document")
-    );
+  const clearCurrentCanvasAnnotations = async () => {
     setClearModalOpen(false);
+
+    try {
+      const activeViewer = document.querySelector("div.pdfViewer.active");
+      if (!activeViewer) return;
+
+      const annotationLayers = Array.from(
+        activeViewer.querySelectorAll("svg.customAnnotationLayer")
+      );
+      const documentIds = Array.from(
+        new Set(
+          annotationLayers
+            .map((item) => item.getAttribute("data-pdf-annotate-document"))
+            .filter(Boolean)
+        )
+      );
+
+      annotationLayers.forEach(function (item) {
+        item.innerHTML = "";
+      });
+
+      const storeAdapter = PDFJSAnnotate.getStoreAdapter();
+      if (!storeAdapter || !storeAdapter.resetAnnotation || !documentIds.length) {
+        return;
+      }
+
+      await Promise.all(
+        documentIds.map((documentId) =>
+          storeAdapter.resetAnnotation(documentId).catch(() => false)
+        )
+      );
+    } catch (error) {
+      // The modal has already closed; leave the canvas usable if a stale DOM node was hit.
+    }
   };
 
   const handleClearClick = () => {
@@ -575,8 +597,8 @@ const Toolelements = () => {
           aria-hidden="true"
         /> : null}
       {clearModalOpen ?
-        <div className="clear-modal-backdrop" role="presentation">
-          <div className="clear-modal-panel" role="dialog" aria-modal="true" aria-labelledby="clearAnnotationsTitle">
+        <div className="clear-modal-backdrop" role="presentation" onClick={() => setClearModalOpen(false)}>
+          <div className="clear-modal-panel" role="dialog" aria-modal="true" aria-labelledby="clearAnnotationsTitle" onClick={(event) => event.stopPropagation()}>
             <span>Clear annotations</span>
             <h2 id="clearAnnotationsTitle">Clear the current canvas?</h2>
             <p>This removes all annotations on the active canvas for everyone in the workspace. Uploaded documents stay available.</p>
