@@ -115,6 +115,40 @@ export function workspaceJoinLink(workspaceId: string) {
   return `${window.location.origin}/#/?join=${encodeURIComponent(workspaceId)}`;
 }
 
+export async function getSpreadsheetState(workspaceId: string, documentId: string) {
+  return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeURIComponent(documentId)}/spreadsheet`);
+}
+
+export async function patchSpreadsheetOperations(workspaceId: string, documentId: string, operations: any[]) {
+  return backendRequest(`/api/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeURIComponent(documentId)}/spreadsheet/ops`, {
+    method: 'PATCH',
+    body: JSON.stringify({ operations }),
+  });
+}
+
+export async function exportSpreadsheetDocument(workspaceId: string, documentId: string, format: 'pdf' | 'xlsx') {
+  const baseUrl = getBackendBaseUrl();
+  if (!baseUrl) throw new Error('backend_url_missing');
+  const headers = new Headers();
+  headers.set('Content-Type', 'application/json');
+  const token = getAuthToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(`${baseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/documents/${encodeURIComponent(documentId)}/spreadsheet/export`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ format }),
+  });
+  if (!response.ok) {
+    let message = `Backend request failed with ${response.status}`;
+    try {
+      const data = await response.json();
+      message = data.error || message;
+    } catch (err) {}
+    throw new Error(message);
+  }
+  return response.blob();
+}
+
 export function getWorkspaceJoinParam(routeSearch: string = '') {
   const routeJoin = new URLSearchParams(routeSearch || '').get('join') || '';
   if (routeJoin) return routeJoin;

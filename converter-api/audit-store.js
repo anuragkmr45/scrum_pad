@@ -8,10 +8,14 @@ try {
   Pool = null;
 }
 
-const databaseUrl = process.env.DATABASE_URL || "";
+function cleanEnvValue(value) {
+  return String(value || "").trim().replace(/^['"]|['"]$/g, "");
+}
+
+const databaseUrl = cleanEnvValue(process.env.DATABASE_URL);
 const hasDatabase = Boolean(databaseUrl && Pool);
-const upstashRedisRestUrl = (process.env.UPSTASH_REDIS_REST_URL || "").replace(/\/$/, "");
-const upstashRedisRestToken = process.env.UPSTASH_REDIS_REST_TOKEN || "";
+const upstashRedisRestUrl = cleanEnvValue(process.env.UPSTASH_REDIS_REST_URL).replace(/\/$/, "");
+const upstashRedisRestToken = cleanEnvValue(process.env.UPSTASH_REDIS_REST_TOKEN);
 const upstashConfigured = Boolean(upstashRedisRestUrl && upstashRedisRestToken);
 const configuredCacheTtlSeconds = Number(process.env.UPSTASH_WORKSPACE_CACHE_TTL_SECONDS || 86400);
 const workspaceCacheTtlSeconds =
@@ -43,6 +47,8 @@ const memory = {
   workspace_presence: {},
   lead_locks: {},
   documents: [],
+  spreadsheet_states: [],
+  spreadsheet_events: [],
   pages: [],
   annotations: [],
   annotation_events: [],
@@ -518,6 +524,24 @@ async function initSchema() {
       metadata JSONB DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS spreadsheet_states (
+      document_id TEXT PRIMARY KEY,
+      workspace_id TEXT,
+      revision INTEGER DEFAULT 0,
+      model_json JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS spreadsheet_events (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT,
+      document_id TEXT,
+      revision INTEGER,
+      operation_json JSONB DEFAULT '{}'::jsonb,
+      user_id TEXT,
+      user_name TEXT,
+      occurred_at TIMESTAMPTZ DEFAULT now()
+    );
     CREATE TABLE IF NOT EXISTS pages (
       id TEXT PRIMARY KEY,
       document_id TEXT,
@@ -579,6 +603,8 @@ async function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_annotation_events_workspace ON annotation_events(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_meeting_notes_workspace ON meeting_notes(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_documents_workspace ON documents(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_spreadsheet_states_workspace ON spreadsheet_states(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_spreadsheet_events_document ON spreadsheet_events(document_id, revision);
     CREATE INDEX IF NOT EXISTS idx_workspace_members_user ON workspace_members(user_id);
     CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace ON workspace_members(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_workspace_invites_email ON workspace_invites(invited_email);
@@ -1504,6 +1530,222 @@ async function listRecentAnnotationEvents(workspaceId) {
   return listAnnotationEvents(workspaceId);
 }
 
+function cloneJson(value, fallback) {
+  try {
+    return JSON.parse(JSON.stringify(value === undefined || value === null ? fallback : value));
+  } catch (err) {
+    return fallback;
+  }
+}
+
+function spreadsheetCellKey(row, col) {
+  return `${Number(row) || 0}:${Number(col) || 0}`;
+}
+
+function normalizeSpreadsheetColor(color, fallback = "") {
+  const value = String(color || "").trim();
+  return /^#[0-9a-f]{6}$/i.test(value) ? value.toUpperCase() : fallback;
+}
+
+function findSpreadsheetSheet(model, sheetId) {
+  const sheets = Array.isArray(model && model.sheets) ? model.sheets : [];
+  return sheets.find(sheet => String(sheet.id) === String(sheetId)) || sheets[0] || null;
+}
+
+function spreadsheetRangeFromOp(op) {
+  const range = op.range || {};
+  const startRow = Number(range.startRow !== undefined ? range.startRow : op.row);
+  const startCol = Number(range.startCol !== undefined ? range.startCol : op.col);
+  const endRow = Number(range.endRow !== undefined ? range.endRow : startRow);
+  const endCol = Number(range.endCol !== undefined ? range.endCol : startCol);
+  return {
+    startRow: Math.max(0, Math.min(startRow, endRow) || 0),
+    endRow: Math.max(0, Math.max(startRow, endRow) || 0),
+    startCol: Math.max(0, Math.min(startCol, endCol) || 0),
+    endCol: Math.max(0, Math.max(startCol, endCol) || 0)
+  };
+}
+
+function applySpreadsheetOperation(model, operation) {
+  const op = operation || {};
+  const sheet = findSpreadsheetSheet(model, op.sheetId || op.sheet_id);
+  if (!sheet) return model;
+
+  sheet.cells = sheet.cells || {};
+  sheet.rowHeights = sheet.rowHeights || {};
+  sheet.columnWidths = sheet.columnWidths || {};
+
+  const type = String(op.type || "").trim();
+  if (type === "setRowHeight") {
+    const row = Math.max(0, Number(op.row) || 0);
+    const height = Math.max(18, Math.min(140, Number(op.height) || 28));
+    sheet.rowHeights[row] = height;
+    sheet.rowCount = Math.max(Number(sheet.rowCount) || 0, row + 1);
+    return model;
+  }
+
+  if (type === "setColumnWidth") {
+    const col = Math.max(0, Number(op.col) || 0);
+    const width = Math.max(48, Math.min(420, Number(op.width) || 110));
+    sheet.columnWidths[col] = width;
+    sheet.columnCount = Math.max(Number(sheet.columnCount) || 0, col + 1);
+    return model;
+  }
+
+  const range = spreadsheetRangeFromOp(op);
+  const cellLimit = 2000;
+  let touched = 0;
+  for (let row = range.startRow; row <= range.endRow; row += 1) {
+    for (let col = range.startCol; col <= range.endCol; col += 1) {
+      touched += 1;
+      if (touched > cellLimit) return model;
+      const key = spreadsheetCellKey(row, col);
+      const cell = sheet.cells[key] || { value: "" };
+      if (type === "setCellValue") {
+        cell.value = op.value === undefined || op.value === null ? "" : String(op.value);
+      } else if (type === "setTextColor") {
+        cell.textColor = normalizeSpreadsheetColor(op.color, cell.textColor || "#252422");
+      } else if (type === "setFillColor") {
+        cell.fillColor = normalizeSpreadsheetColor(op.color, cell.fillColor || "");
+      } else if (type === "setCellStyle") {
+        const style = op.style || {};
+        if (style.textColor !== undefined) cell.textColor = normalizeSpreadsheetColor(style.textColor, cell.textColor || "#252422");
+        if (style.fillColor !== undefined) cell.fillColor = normalizeSpreadsheetColor(style.fillColor, cell.fillColor || "");
+      } else if (type === "resetCellStyle") {
+        delete cell.textColor;
+        delete cell.fillColor;
+      }
+      sheet.cells[key] = cell;
+      sheet.rowCount = Math.max(Number(sheet.rowCount) || 0, row + 1);
+      sheet.columnCount = Math.max(Number(sheet.columnCount) || 0, col + 1);
+    }
+  }
+  return model;
+}
+
+async function saveSpreadsheetState(body) {
+  const state = {
+    document_id: body.documentId || body.document_id || "",
+    workspace_id: body.workspaceId || body.workspace_id || "",
+    revision: Number(body.revision || 0),
+    model_json: body.model || body.model_json || {},
+    created_at: nowIso(),
+    updated_at: nowIso()
+  };
+  if (!state.document_id) {
+    const err = new Error("document_required");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!pool) {
+    const index = memory.spreadsheet_states.findIndex(item => item.document_id === state.document_id);
+    if (index === -1) memory.spreadsheet_states.push(state);
+    else memory.spreadsheet_states[index] = { ...memory.spreadsheet_states[index], ...state, updated_at: nowIso() };
+    return index === -1 ? state : memory.spreadsheet_states[index];
+  }
+
+  const result = await query(
+    `INSERT INTO spreadsheet_states (document_id, workspace_id, revision, model_json)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (document_id)
+     DO UPDATE SET workspace_id = EXCLUDED.workspace_id,
+                   revision = EXCLUDED.revision,
+                   model_json = EXCLUDED.model_json,
+                   updated_at = now()
+     RETURNING *`,
+    [state.document_id, state.workspace_id, state.revision, state.model_json]
+  );
+  return result.rows[0];
+}
+
+async function getSpreadsheetState(workspaceId, documentId) {
+  if (!documentId) return null;
+  if (!pool) {
+    return memory.spreadsheet_states.find(item => (
+      item.document_id === documentId && (!workspaceId || item.workspace_id === workspaceId)
+    )) || null;
+  }
+  const result = await query(
+    `SELECT * FROM spreadsheet_states
+     WHERE document_id = $1 AND ($2 = '' OR workspace_id = $2)
+     LIMIT 1`,
+    [documentId, workspaceId || ""]
+  );
+  return result.rows[0] || null;
+}
+
+async function applySpreadsheetOperations(body) {
+  const workspaceId = body.workspaceId || body.workspace_id || "";
+  const documentId = body.documentId || body.document_id || "";
+  const operations = Array.isArray(body.operations || body.ops)
+    ? (body.operations || body.ops)
+    : body.operation
+      ? [body.operation]
+      : [];
+  const current = await getSpreadsheetState(workspaceId, documentId);
+  if (!current) {
+    const err = new Error("spreadsheet_not_found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  let model = cloneJson(current.model_json, { sheets: [] });
+  let revision = Number(current.revision || 0);
+  const events = [];
+  operations.forEach(operation => {
+    revision += 1;
+    model = applySpreadsheetOperation(model, operation);
+    events.push({
+      id: makeId("sheet_evt"),
+      workspace_id: workspaceId,
+      document_id: documentId,
+      revision,
+      operation_json: operation,
+      user_id: body.userId || body.user_id || "",
+      user_name: body.userName || body.user_name || "",
+      occurred_at: nowIso()
+    });
+  });
+
+  const state = await saveSpreadsheetState({
+    workspaceId,
+    documentId,
+    revision,
+    model
+  });
+
+  if (!pool) {
+    memory.spreadsheet_events.push(...events);
+  } else if (events.length) {
+    for (const event of events) {
+      await query(
+        `INSERT INTO spreadsheet_events
+          (id, workspace_id, document_id, revision, operation_json, user_id, user_name, occurred_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          event.id,
+          event.workspace_id,
+          event.document_id,
+          event.revision,
+          event.operation_json,
+          event.user_id,
+          event.user_name,
+          event.occurred_at
+        ]
+      );
+    }
+  }
+
+  return {
+    state,
+    model,
+    revision,
+    operations,
+    events
+  };
+}
+
 async function annotationTimeline(workspaceId, annotationId) {
   const id = String(annotationId || "").trim();
   if (!workspaceId || !id) return [];
@@ -1686,6 +1928,9 @@ module.exports = {
   listWorkspacePresence,
   clearWorkspacePresence,
   createDocument,
+  saveSpreadsheetState,
+  getSpreadsheetState,
+  applySpreadsheetOperations,
   recordAnnotationEvent,
   listAnnotationEvents,
   listRecentAnnotationEvents,

@@ -580,7 +580,7 @@ div.media-board{
   height: 100%;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 112px;
   box-sizing: border-box;
@@ -598,7 +598,7 @@ div.media-board.viewer-zoomed {
 }
 
 #main-container {
-  width: 100%;
+  width: max-content;
   min-width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
@@ -983,9 +983,199 @@ div#remove_page:after{
   display: flex;
   flex-direction: column;
   align-items: center;
-  width: 100%;
+  width: max-content;
   min-width: 100%;
   margin: 0 auto;
+}
+
+.spreadsheet-review-canvas {
+  width: min(1320px, calc(100vw - var(--hexscrum-board-left-gutter) - var(--hexscrum-board-right-gutter)));
+  min-width: 920px;
+  height: calc(100vh - 188px);
+  margin: 18px auto 128px;
+  border: 1px solid rgba(64, 61, 57, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 252, 242, 0.96);
+  box-shadow: 0 18px 54px rgba(37, 36, 34, 0.16);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr;
+  color: #252422;
+}
+
+.spreadsheet-review-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(64, 61, 57, 0.14);
+  background: linear-gradient(145deg, rgba(255, 252, 242, 0.94), rgba(204, 197, 185, 0.58));
+  overflow-x: auto;
+
+  > div {
+    min-width: 220px;
+    margin-right: 4px;
+  }
+
+  strong,
+  span {
+    display: block;
+    white-space: nowrap;
+  }
+
+  strong {
+    font-size: 13px;
+    font-weight: 850;
+  }
+
+  span {
+    color: rgba(64, 61, 57, 0.72);
+    font-size: 11px;
+  }
+
+  label,
+  button {
+    min-height: 34px;
+    border: 1px solid rgba(64, 61, 57, 0.16);
+    border-radius: 8px;
+    background: rgba(255, 252, 242, 0.82);
+    color: #403d39;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  input[type="color"] {
+    width: 24px;
+    height: 24px;
+    border: 0;
+    padding: 0;
+    background: transparent;
+  }
+
+  button {
+    padding: 0 10px;
+    cursor: pointer;
+
+    &:hover {
+      border-color: rgba(235, 94, 40, 0.52);
+      color: #eb5e28;
+    }
+  }
+}
+
+.spreadsheet-sheet-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(64, 61, 57, 0.12);
+  overflow-x: auto;
+
+  button {
+    min-height: 30px;
+    border: 1px solid rgba(64, 61, 57, 0.14);
+    border-radius: 999px;
+    padding: 0 12px;
+    background: rgba(204, 197, 185, 0.22);
+    color: #403d39;
+    font-size: 12px;
+    font-weight: 820;
+    cursor: pointer;
+
+    &.active {
+      border-color: #eb5e28;
+      background: #eb5e28;
+      color: #fffcf2;
+    }
+  }
+}
+
+.spreadsheet-status {
+  min-height: 24px;
+  padding: 5px 12px;
+  color: rgba(64, 61, 57, 0.7);
+  font-size: 12px;
+}
+
+.spreadsheet-grid-scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+  background: #ccc5b9;
+}
+
+.spreadsheet-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  min-width: max-content;
+  background: #fffcf2;
+
+  th,
+  td {
+    min-width: 48px;
+    border-right: 1px solid rgba(64, 61, 57, 0.22);
+    border-bottom: 1px solid rgba(64, 61, 57, 0.18);
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  thead th,
+  tbody th {
+    position: sticky;
+    z-index: 2;
+    background: #403d39;
+    color: #fffcf2;
+    font-size: 12px;
+    font-weight: 850;
+    text-align: center;
+  }
+
+  thead th {
+    top: 0;
+    height: 32px;
+  }
+
+  tbody th {
+    left: 0;
+    width: 54px;
+  }
+
+  .corner-cell {
+    left: 0;
+    z-index: 3;
+    width: 54px;
+  }
+
+  td {
+    background: #fffcf2;
+
+    &.selected {
+      outline: 2px solid #eb5e28;
+      outline-offset: -2px;
+      box-shadow: inset 0 0 0 1px rgba(235, 94, 40, 0.44);
+    }
+  }
+
+  td input {
+    width: 100%;
+    height: 100%;
+    min-height: 26px;
+    border: 0;
+    padding: 3px 6px;
+    background: transparent;
+    color: inherit;
+    font-size: 12px;
+    line-height: 18px;
+    outline: none;
+    box-sizing: border-box;
+  }
 }
 
 .presentation-status-bar {

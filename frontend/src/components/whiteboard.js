@@ -10,6 +10,8 @@ import FullScreen from './fullscreen/index';
 import { t } from '../i18n';
 import { getAnnotationEvents, getHexscrumProfile, getWorkspaceId, postAnnotationEvent } from '../utils/hexscrum-api';
 import { addSnapshotAppliedListener } from '../utils/annotation-history';
+import SpreadsheetReviewCanvas from './whiteboard/SpreadsheetReviewCanvas';
+import { getSpreadsheetDocument } from '../utils/spreadsheet-docs';
 
 (typeof window !== "undefined"
   ? window
@@ -240,13 +242,22 @@ const Whiteboard = () => {
   const [fullScreen, setFullScreen] = useState(false);
 
   var elements = [];
-  fileState.pdfFiles.forEach(function (value) {
+  const latestSpreadsheetMeta = getSpreadsheetDocument(String(fileState.pdfFiles[fileState.pdfFiles.length - 1]));
+  fileState.pdfFiles.forEach(function (value, index) {
+    const spreadsheetMeta = getSpreadsheetDocument(String(value));
+    const isActive = latestSpreadsheetMeta
+      ? index === fileState.pdfFiles.length - 1
+      : value === 1;
     elements.push(
       <div
         id={`viewerContainer${value}`}
-        className={"pdfViewer " + (value === 1 ? "active" : "")}
+        className={"pdfViewer " + (isActive ? "active" : "")}
         key={`${value}`}
-      ></div>
+      >
+        {spreadsheetMeta ?
+          <SpreadsheetReviewCanvas fileUrl={String(value)} meta={spreadsheetMeta} /> :
+          null}
+      </div>
     );
   });
   const hideLoader = () => {
@@ -256,14 +267,19 @@ const Whiteboard = () => {
     } catch (e) { }
   };
   useEffect(() => {
-    if (
-      !document
-        .getElementById(
-          `viewerContainer${fileState.pdfFiles[fileState.pdfFiles.length - 1]}`
-        )
-        .getElementsByTagName("svg").length
-    )
-      renderPdf(fileState.pdfFiles[fileState.pdfFiles.length - 1]);
+    const latestFile = fileState.pdfFiles[fileState.pdfFiles.length - 1];
+    const latestViewer = document.getElementById(`viewerContainer${latestFile}`);
+    if (!latestViewer) return;
+    if (getSpreadsheetDocument(String(latestFile))) {
+      const activeViewer = document.getElementsByClassName("pdfViewer active")[0];
+      activeViewer && activeViewer.classList.remove("active");
+      latestViewer.classList.add("active");
+      fileState.setTotalPages && fileState.setTotalPages(1);
+      resetBoardScroll();
+      return;
+    }
+    if (!latestViewer.getElementsByTagName("svg").length)
+      renderPdf(latestFile);
   }, [fileState.pdfFiles]);
 
   const renderPdf = (pages, custom = 0) => {
@@ -645,12 +661,28 @@ const Whiteboard = () => {
             const board = document.querySelector(".media-board");
             if (board) {
               window.__hexscrumApplyingRemoteScroll = true;
-            board.scrollTop = annotate.annotationId;
+              if (annotate.annotationId && typeof annotate.annotationId === 'object') {
+                board.scrollTop = Number(annotate.annotationId.top || 0);
+                board.scrollLeft = Number(annotate.annotationId.left || 0);
+              } else {
+                board.scrollTop = annotate.annotationId;
+              }
               window.setTimeout(() => {
                 window.__hexscrumApplyingRemoteScroll = false;
               }, 80);
             }
             break
+        }
+        case 'spreadsheet-op': {
+            window.dispatchEvent(new CustomEvent('hexscrum:spreadsheet-op', {
+              detail: {
+                documentId,
+                operation: annotationPayload && annotationPayload.operation,
+                revision: annotationPayload && annotationPayload.revision,
+                senderUid: annotate.senderUid,
+              },
+            }));
+            break;
         }
         case 'presentation-mode': {
             if (typeof window.__hexscrumSetPresentationMode === 'function') {

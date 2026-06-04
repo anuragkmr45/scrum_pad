@@ -153,6 +153,15 @@ async function main() {
     if (fixture.expectedKind === "spreadsheet" && !["grid-fit", "libreoffice-default"].includes(result.conversionProfile)) {
       throw new Error(`${path.basename(fixture.path)} returned conversionProfile=${result.conversionProfile}`);
     }
+    if (fixture.expectedKind === "spreadsheet") {
+      const firstSheet = result.spreadsheet && result.spreadsheet.model && result.spreadsheet.model.sheets && result.spreadsheet.model.sheets[0];
+      if (!result.spreadsheetEditable || !firstSheet) {
+        throw new Error(`${path.basename(fixture.path)} did not return an editable spreadsheet model`);
+      }
+      if (!firstSheet.rowCount || !firstSheet.columnCount) {
+        throw new Error(`${path.basename(fixture.path)} returned an empty spreadsheet model`);
+      }
+    }
     const pages = await assertPdf(result.secure_url || result.url, fixture.minPages);
     console.log(`${path.basename(fixture.path)} ok: ${pages} PDF page(s), ${result.documentKind}/${result.conversionProfile}`);
   }

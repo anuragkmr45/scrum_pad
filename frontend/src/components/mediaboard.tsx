@@ -12,6 +12,7 @@ import LocalStoreAdapter from '../utils/PdfAnnotate/adapter/LocalStoreAdapter';
 import { RoomMessage } from '../utils/agora-rtm-client';
 import PDFJSAnnotate from '../utils/PdfAnnotate/PDFJSAnnotate';
 import { getWorkspace, getWorkspaceId } from '../utils/hexscrum-api';
+import { registerSpreadsheetDocumentFromWorkspaceDocument } from '../utils/spreadsheet-docs';
 
 
 interface MediaBoardProps {
@@ -341,6 +342,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
           .slice()
           .sort((first: any, second: any) => String(first.created_at || '').localeCompare(String(second.created_at || '')));
         documents.forEach((document: any) => {
+          registerSpreadsheetDocumentFromWorkspaceDocument(document);
           const fileUrl = document.converted_pdf_url || document.convertedPdfUrl || document.storage_url || document.storageUrl || '';
           if (fileUrl) {
             dispatch({ type: 'remote-add-page', fileId: fileUrl });
@@ -352,7 +354,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pdfFiles.length]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -527,7 +529,10 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
         const board = document.querySelector('.media-board') as HTMLElement | null;
         if (!board) return;
         lastScrollSentAt.current = Date.now();
-        sendToRemote("", "", "sync-scroll", board.scrollTop);
+        sendToRemote("", "", "sync-scroll", {
+          top: board.scrollTop,
+          left: board.scrollLeft,
+        });
       };
       const elapsed = Date.now() - lastScrollSentAt.current;
       if (elapsed >= 120) {

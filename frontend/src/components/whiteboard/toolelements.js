@@ -21,6 +21,7 @@ import PersonIcon from '@material-ui/icons/Person';
 import { roomStore } from '../../stores/room';
 import { useLocation } from 'react-router';
 import { getHexscrumProfile, getWorkspaceId } from '../../utils/hexscrum-api';
+import { registerSpreadsheetDocumentFromUpload } from '../../utils/spreadsheet-docs';
 
 const Toolelements = () => {
   const [isPdf, showHighLight] = useState(false);
@@ -362,6 +363,7 @@ const Toolelements = () => {
           fileType: 'PDF',
           message: 'Document ready. Syncing to workspace...'
         });
+        registerSpreadsheetDocumentFromUpload(data);
         fileState.fileDispatch({ type: "upload-file", fileId: data.secure_url || data.url });
         hideLoader();
       })

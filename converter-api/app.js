@@ -578,6 +578,96 @@ async function convertSpreadsheetToPdf(inputPath, outputPath, ext) {
   };
 }
 
+async function runSpreadsheetModelScript(args, timeoutMs = 180000) {
+  const command = getLibreOfficeCommand();
+  const scriptPath = path.join(__dirname, "scripts", "spreadsheet_model.py");
+  if (!command || !fs.existsSync(scriptPath)) {
+    throw new Error("converter_not_available");
+  }
+
+  const profileDir = path.join(uploadDir, `lo-profile-sheet-${crypto.randomBytes(6).toString("hex")}`);
+  const port = 22000 + crypto.randomInt(10000);
+  await fs.promises.mkdir(profileDir, { recursive: true });
+
+  const listener = spawn(command, [
+    `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
+    "--headless",
+    "--nologo",
+    "--nodefault",
+    "--nofirststartwizard",
+    "--nolockcheck",
+    "--norestore",
+    `--accept=socket,host=127.0.0.1,port=${port};urp;StarOffice.ComponentContext`
+  ], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      HOME: process.env.LIBREOFFICE_HOME || "/tmp",
+      TMPDIR: process.env.TMPDIR || "/tmp"
+    }
+  });
+
+  let listenerStderr = "";
+  listener.stderr.on("data", chunk => {
+    listenerStderr += chunk.toString();
+  });
+
+  try {
+    await runCommand("python3", [
+      scriptPath,
+      ...args(port)
+    ], { timeoutMs });
+  } catch (err) {
+    const suffix = listenerStderr.trim() ? ` ${listenerStderr.trim()}` : "";
+    throw new Error(`${err.message}${suffix}`);
+  } finally {
+    listener.kill("SIGTERM");
+    fs.promises.rm(profileDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function extractSpreadsheetModel(inputPath, ext, csvDelimiter) {
+  const outputJson = path.join(uploadDir, `spreadsheet-model-${crypto.randomBytes(8).toString("hex")}.json`);
+  try {
+    await runSpreadsheetModelScript(
+      port => [
+        "parse",
+        inputPath,
+        outputJson,
+        ext,
+        String(port),
+        csvFilterOptions(csvDelimiter || ",")
+      ],
+      180000
+    );
+    return JSON.parse(await fs.promises.readFile(outputJson, "utf8"));
+  } finally {
+    deleteFile(outputJson);
+  }
+}
+
+async function exportSpreadsheetModel(model, outputPath, format) {
+  const inputJson = path.join(uploadDir, `spreadsheet-export-${crypto.randomBytes(8).toString("hex")}.json`);
+  try {
+    await fs.promises.writeFile(inputJson, JSON.stringify(model || { sheets: [] }), "utf8");
+    await runSpreadsheetModelScript(
+      port => [
+        "export",
+        inputJson,
+        outputPath,
+        format === "pdf" ? "pdf" : "xlsx",
+        String(port)
+      ],
+      180000
+    );
+    if (!fs.existsSync(outputPath)) {
+      throw new Error("spreadsheet_export_missing");
+    }
+  } finally {
+    deleteFile(inputJson);
+  }
+}
+
 function convertImageToPdf(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ autoFirstPage: false });
@@ -881,6 +971,82 @@ app.delete(
   })
 );
 
+async function requireWorkspaceSpreadsheetAccess(req, res) {
+  const member = await auditStore.getWorkspaceMember(req.params.id, req.user.id);
+  if (!member || ["kicked", "blocked", "ended"].includes(member.status)) {
+    res.status(403).json({ error: "workspace_access_denied" });
+    return null;
+  }
+  return member;
+}
+
+app.get(
+  "/api/workspaces/:id/documents/:documentId/spreadsheet",
+  requireAuth(async function(req, res) {
+    const member = await requireWorkspaceSpreadsheetAccess(req, res);
+    if (!member) return;
+    const state = await auditStore.getSpreadsheetState(req.params.id, req.params.documentId);
+    if (!state) return res.status(404).json({ error: "spreadsheet_not_found" });
+    return res.status(200).json({
+      documentId: state.document_id,
+      workspaceId: state.workspace_id,
+      revision: state.revision || 0,
+      model: state.model_json || {}
+    });
+  })
+);
+
+app.patch(
+  "/api/workspaces/:id/documents/:documentId/spreadsheet/ops",
+  requireAuth(async function(req, res) {
+    const member = await requireWorkspaceSpreadsheetAccess(req, res);
+    if (!member) return;
+    const result = await auditStore.applySpreadsheetOperations({
+      workspaceId: req.params.id,
+      documentId: req.params.documentId,
+      operations: req.body.operations || req.body.ops || [],
+      operation: req.body.operation,
+      userId: req.user.id,
+      userName: req.user.name
+    });
+    return res.status(200).json({
+      documentId: req.params.documentId,
+      workspaceId: req.params.id,
+      revision: result.revision,
+      operations: result.operations,
+      model: result.model
+    });
+  })
+);
+
+app.post(
+  "/api/workspaces/:id/documents/:documentId/spreadsheet/export",
+  requireAuth(async function(req, res) {
+    const member = await requireWorkspaceSpreadsheetAccess(req, res);
+    if (!member) return;
+    const state = await auditStore.getSpreadsheetState(req.params.id, req.params.documentId);
+    if (!state) return res.status(404).json({ error: "spreadsheet_not_found" });
+    const format = String(req.body.format || req.query.format || "pdf").toLowerCase() === "xlsx" ? "xlsx" : "pdf";
+    const extension = format === "xlsx" ? "xlsx" : "pdf";
+    const outputPath = path.join(uploadDir, `spreadsheet-export-${crypto.randomBytes(8).toString("hex")}.${extension}`);
+    await exportSpreadsheetModel(state.model_json || {}, outputPath, format);
+    const filename = `hexscrum-spreadsheet-${req.params.documentId}.${extension}`;
+    res.setHeader(
+      "Content-Type",
+      format === "xlsx"
+        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        : "application/pdf"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.sendFile(outputPath, err => {
+      deleteFile(outputPath);
+      if (err && !res.headersSent) {
+        res.status(500).json({ error: "spreadsheet_export_failed" });
+      }
+    });
+  })
+);
+
 app.get(
   "/api/agora/rtm-token",
   asyncRoute(async function(req, res) {
@@ -949,10 +1115,20 @@ app.post(
     const publicId = `${Date.now()}-${randomStr}`;
     const publicFileName = `${publicId}.pdf`;
     let prepared;
+    let spreadsheetModel = null;
+    let spreadsheetModelError = "";
 
     try {
       await moveUploadedFile(sampleFile, inputPath);
       prepared = await preparePdf(inputPath, outputPath, ext);
+      if (prepared.documentKind === "spreadsheet") {
+        try {
+          spreadsheetModel = await extractSpreadsheetModel(inputPath, ext, prepared.csvDelimiter || ",");
+        } catch (err) {
+          spreadsheetModelError = err.message || "spreadsheet_model_unavailable";
+          console.warn("Spreadsheet model extraction skipped:", spreadsheetModelError);
+        }
+      }
       const upload = await uploadOutput(prepared.outputPath, publicId, prepared.contentType);
       const publicPath = path.join(publicUploadDir, publicFileName);
       await copyFile(prepared.outputPath, publicPath);
@@ -972,6 +1148,8 @@ app.post(
               conversionProfile: prepared.conversionProfile,
               sourceExtension: prepared.sourceExtension,
               csvDelimiter: prepared.csvDelimiter || "",
+              spreadsheetEditable: Boolean(spreadsheetModel),
+              spreadsheetModelError,
               storageProvider,
               backendFileUrl: servedPdfUrl,
               cloudinaryUrl: upload.secure_url || upload.url,
@@ -982,6 +1160,21 @@ app.post(
             }
           })
         : null;
+      let spreadsheet = null;
+      if (document && spreadsheetModel) {
+        const state = await auditStore.saveSpreadsheetState({
+          workspaceId: document.workspace_id || req.body.workspaceId,
+          documentId: document.id,
+          revision: 0,
+          model: spreadsheetModel
+        });
+        spreadsheet = {
+          documentId: document.id,
+          workspaceId: document.workspace_id || req.body.workspaceId,
+          revision: state.revision || 0,
+          model: spreadsheetModel
+        };
+      }
 
       return res.status(200).json({
         url: servedPdfUrl,
@@ -997,7 +1190,10 @@ app.post(
         conversionProfile: prepared.conversionProfile,
         sourceExtension: prepared.sourceExtension,
         csvDelimiter: prepared.csvDelimiter || "",
-        document
+        spreadsheetEditable: Boolean(spreadsheet),
+        spreadsheetModelError,
+        document,
+        spreadsheet
       });
     } catch (err) {
       const messageMap = {
