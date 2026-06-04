@@ -79,7 +79,11 @@ type ExportOrientation = 'auto' | 'portrait' | 'landscape';
 type ExportCanvasOption = {
   id: string
   label: string
+  viewerId: string
+  pageNumber: number
   pageCount: number
+  width: number
+  height: number
 }
 
 type ExportPreviewItem = ExportCanvasOption & {
@@ -252,11 +256,24 @@ function getExportCanvasOptions(): ExportCanvasOption[] {
     document.querySelectorAll('#main-container > .pdfViewer')
   ) as HTMLElement[];
 
-  return viewers.map((viewer, index) => ({
-    id: viewer.id,
-    label: `Canvas ${index + 1}`,
-    pageCount: viewer.querySelectorAll('.page').length || 1,
-  }));
+  return viewers.flatMap((viewer, viewerIndex) => {
+    const pages = Array.from(viewer.querySelectorAll('.page')) as HTMLElement[];
+    const totalPages = pages.length || 1;
+    return pages.map((page, pageIndex) => {
+      const pageNumber = Number(page.getAttribute('data-page-number')) || pageIndex + 1;
+      const width = Number(page.getAttribute('data-pdf-width')) || page.offsetWidth || page.clientWidth || 1;
+      const height = Number(page.getAttribute('data-pdf-height')) || page.offsetHeight || page.clientHeight || 1;
+      return {
+        id: `${viewer.id}__page-${pageNumber}`,
+        viewerId: viewer.id,
+        label: `Document ${viewerIndex + 1} · Page ${pageNumber}`,
+        pageNumber,
+        pageCount: totalPages,
+        width,
+        height,
+      };
+    });
+  });
 }
 
 function workspaceCodeFromId(workspaceId: string) {
@@ -291,26 +308,83 @@ function getPdfOrientation(
   return canvas.width >= canvas.height ? 'l' : 'p';
 }
 
+function getPdfPageSize(
+  requestedOrientation: ExportOrientation,
+  canvas: HTMLCanvasElement
+) {
+  let width = canvas.width;
+  let height = canvas.height;
+
+  if (requestedOrientation === 'portrait' && width > height) {
+    return [height, width];
+  }
+
+  if (requestedOrientation === 'landscape' && height > width) {
+    return [height, width];
+  }
+
+  return [width, height];
+}
+
+function fitImageInsidePage(canvas: HTMLCanvasElement, pageWidth: number, pageHeight: number) {
+  const scale = Math.min(pageWidth / canvas.width, pageHeight / canvas.height);
+  const width = canvas.width * scale;
+  const height = canvas.height * scale;
+
+  return {
+    x: (pageWidth - width) / 2,
+    y: (pageHeight - height) / 2,
+    width,
+    height,
+  };
+}
+
 function captureCanvasForExport(
-  viewer: HTMLElement,
+  page: HTMLElement,
   includeAnnotations: boolean,
   scale: number = 1
 ) {
-  return html2canvas(viewer, {
+  const viewer = page.closest('.pdfViewer') as HTMLElement | null;
+  const pageNumber = page.getAttribute('data-page-number') || '';
+  return html2canvas(page, {
     backgroundColor: '#ffffff',
     useCORS: true,
     scale,
     onclone: (clonedDocument: Document) => {
-      if (includeAnnotations) return;
-      const clonedViewer = clonedDocument.getElementById(viewer.id);
-      if (!clonedViewer) return;
-      clonedViewer
-        .querySelectorAll('svg.customAnnotationLayer')
-        .forEach((layer: Element) => {
-          (layer as HTMLElement).style.display = 'none';
-        });
+      const clonedViewer = viewer ? clonedDocument.getElementById(viewer.id) : null;
+      const clonedPage = clonedViewer
+        ? clonedViewer.querySelector(`.page[data-page-number="${pageNumber}"]`) as HTMLElement | null
+        : null;
+
+      if (!clonedPage) return;
+
+      clonedPage.style.zoom = '1';
+      clonedPage.style.transform = 'none';
+      clonedPage.style.margin = '0';
+      clonedPage.style.boxShadow = 'none';
+      clonedPage.style.borderRadius = '0';
+      clonedPage.style.overflow = 'hidden';
+
+      const sourceWidth = Number(page.getAttribute('data-pdf-width')) || page.offsetWidth || page.clientWidth;
+      const sourceHeight = Number(page.getAttribute('data-pdf-height')) || page.offsetHeight || page.clientHeight;
+      if (sourceWidth > 0) clonedPage.style.width = `${sourceWidth}px`;
+      if (sourceHeight > 0) clonedPage.style.height = `${sourceHeight}px`;
+
+      if (!includeAnnotations) {
+        clonedPage
+          .querySelectorAll('svg.customAnnotationLayer')
+          .forEach((layer: Element) => {
+            (layer as HTMLElement).style.display = 'none';
+          });
+      }
     },
   });
+}
+
+function getExportPageElement(option: ExportCanvasOption) {
+  const viewer = document.getElementById(option.viewerId);
+  if (!viewer) return null;
+  return viewer.querySelector(`.page[data-page-number="${option.pageNumber}"]`) as HTMLElement | null;
 }
 
 export default function Control({
@@ -488,19 +562,19 @@ export default function Control({
     setGeneratingPreview(true);
     try {
       await activediv('active');
-      const viewers = Array.from(
-        document.querySelectorAll('#main-container > .pdfViewer')
-      ).filter((viewer) => selectedExportCanvasIds.includes((viewer as HTMLElement).id)) as HTMLElement[];
-
       const nextPreviewItems: ExportPreviewItem[] = [];
-      for (const viewer of viewers) {
-        const canvasMeta = exportCanvases.find((item) => item.id === viewer.id);
-        const previewCanvas = await captureCanvasForExport(viewer, exportIncludeAnnotations, 0.28);
+      const selectedPages = exportCanvases
+        .filter((item) => selectedExportCanvasIds.includes(item.id))
+        .slice(0, 8);
+
+      for (const pageMeta of selectedPages) {
+        const page = getExportPageElement(pageMeta);
+        if (!page) continue;
+        const previewCanvas = await captureCanvasForExport(page, exportIncludeAnnotations, 0.28);
         if (previewRequestId.current !== requestId) return;
         nextPreviewItems.push({
-          id: viewer.id,
-          label: canvasMeta ? canvasMeta.label : viewer.id.replace('viewerContainer', 'Canvas '),
-          pageCount: canvasMeta ? canvasMeta.pageCount : viewer.querySelectorAll('.page').length || 1,
+          ...pageMeta,
+          pageCount: 1,
           imageUrl: previewCanvas.toDataURL('image/jpeg', 0.72),
         });
       }
@@ -768,11 +842,11 @@ export default function Control({
     try {
       await activediv('active');
 
-      const viewers = Array.from(
-        document.querySelectorAll('#main-container > .pdfViewer')
-      ).filter((viewer) => selectedExportCanvasIds.includes((viewer as HTMLElement).id)) as HTMLElement[];
+      const selectedPages = exportCanvases.filter((page) =>
+        selectedExportCanvasIds.includes(page.id)
+      );
 
-      if (!viewers.length) {
+      if (!selectedPages.length) {
         globalStore.showToast({
           type: 'notice-board',
           message: 'No selected workspace pages to download',
@@ -782,34 +856,46 @@ export default function Control({
 
       let pdf: any = null;
 
-      for (let i = 0; i < viewers.length; i++) {
-        const sourceCanvas = await captureCanvasForExport(viewers[i], exportIncludeAnnotations);
+      for (let i = 0; i < selectedPages.length; i++) {
+        const pageElement = getExportPageElement(selectedPages[i]);
+        if (!pageElement) continue;
+
+        const sourceCanvas = await captureCanvasForExport(pageElement, exportIncludeAnnotations);
         const canvas = rotateCanvas(sourceCanvas, exportRotation);
         const pageOrientation = getPdfOrientation(exportOrientation, canvas);
+        const [pageWidth, pageHeight] = getPdfPageSize(exportOrientation, canvas);
 
         if (!pdf) {
           pdf = new jsPDF({
             orientation: pageOrientation,
-            unit: 'mm',
-            format: 'a4',
+            unit: 'pt',
+            format: [pageWidth, pageHeight],
           });
         } else {
-          pdf.addPage('a4', pageOrientation);
+          pdf.addPage([pageWidth, pageHeight], pageOrientation);
         }
 
-        const pageWidth = pdf.internal.pageSize.getWidth();
-        const pageHeight = pdf.internal.pageSize.getHeight();
         const imgData = canvas.toDataURL('image/jpeg', 0.95);
-        const margin = 10;
-        const availableWidth = pageWidth - margin * 2;
-        const availableHeight = pageHeight - margin * 2;
-        const scale = Math.min(availableWidth / canvas.width, availableHeight / canvas.height);
-        const imageWidth = canvas.width * scale;
-        const imageHeight = canvas.height * scale;
-        const x = (pageWidth - imageWidth) / 2;
-        const y = (pageHeight - imageHeight) / 2;
+        const placement = fitImageInsidePage(canvas, pageWidth, pageHeight);
 
-        pdf.addImage(imgData, 'JPEG', x, y, imageWidth, imageHeight, undefined, 'FAST');
+        pdf.addImage(
+          imgData,
+          'JPEG',
+          placement.x,
+          placement.y,
+          placement.width,
+          placement.height,
+          undefined,
+          'FAST'
+        );
+      }
+
+      if (!pdf) {
+        globalStore.showToast({
+          type: 'notice-board',
+          message: 'No selected workspace pages could be captured',
+        });
+        return;
       }
 
       const roomName = roomStore._state.course.roomName || 'workspace';
@@ -1246,7 +1332,7 @@ export default function Control({
 
             <div className="export-modal-section">
               <div className="export-section-title">
-                <strong>Canvas pages</strong>
+                <strong>Document pages</strong>
                 <button type="button" onClick={toggleAllExportCanvases} disabled={isExporting}>
                   {selectedExportCanvasIds.length === exportCanvases.length ? 'Clear all' : 'Select all'}
                 </button>
@@ -1262,7 +1348,7 @@ export default function Control({
                     />
                     <span>
                       <strong>{canvas.label}</strong>
-                      <small>{canvas.pageCount} document page{canvas.pageCount === 1 ? '' : 's'}</small>
+                      <small>Page {canvas.pageNumber} of {canvas.pageCount}</small>
                     </span>
                   </label>
                 ))}
@@ -1337,16 +1423,16 @@ export default function Control({
                         <img src={preview.imageUrl} alt={`${preview.label} export preview`} />
                         <figcaption>
                           <strong>{preview.label}</strong>
-                          <span>{preview.pageCount} page{preview.pageCount === 1 ? '' : 's'} · {exportIncludeAnnotations ? 'with annotations' : 'document only'}</span>
+                          <span>{exportIncludeAnnotations ? 'with annotations' : 'document only'}</span>
                         </figcaption>
                       </figure>
                     )) :
-                    <div className="export-preview-loading">Select a canvas to preview.</div>
+                    <div className="export-preview-loading">Select document pages to preview.</div>
                 }
               </div>
               <div className="export-preview-card">
                 <div>
-                  <span>Canvases</span>
+                  <span>Pages</span>
                   <strong>{selectedExportCanvasIds.length}/{exportCanvases.length}</strong>
                 </div>
                 <div>
@@ -1380,7 +1466,7 @@ export default function Control({
             </div>
 
             <div className="export-modal-footer">
-              <span>{selectedExportCanvasIds.length} selected</span>
+              <span>{selectedExportCanvasIds.length} page{selectedExportCanvasIds.length === 1 ? '' : 's'} selected</span>
               <button
                 type="button"
                 className="primary"

@@ -123,6 +123,7 @@ const allowedExtensions = new Set([
 ]);
 
 const imageExtensions = new Set([".png", ".jpg", ".jpeg"]);
+const spreadsheetExtensions = new Set([".xls", ".xlsx", ".ods", ".csv"]);
 const officeExtensions = new Set([
   ".ppt",
   ".pptx",
@@ -427,6 +428,142 @@ async function convertOfficeToPdf(inputPath, outputPath) {
   await convertWithLibreOffice(inputPath, outputPath);
 }
 
+function getLibreOfficeCommand() {
+  return commandExists("libreoffice") ? "libreoffice" : commandExists("soffice") ? "soffice" : "";
+}
+
+let spreadsheetProfileAvailableCache = null;
+
+function spreadsheetProfileAvailable() {
+  if (spreadsheetProfileAvailableCache !== null) {
+    return spreadsheetProfileAvailableCache;
+  }
+
+  const scriptPath = path.join(__dirname, "scripts", "spreadsheet_to_pdf.py");
+  const unoCheck = commandExists("python3")
+    ? spawnSync("python3", ["-c", "import uno"], { encoding: "utf8" })
+    : { status: 1 };
+
+  spreadsheetProfileAvailableCache = Boolean(
+    getLibreOfficeCommand() &&
+      fs.existsSync(scriptPath) &&
+      unoCheck.status === 0
+  );
+
+  return spreadsheetProfileAvailableCache;
+}
+
+async function detectCsvDelimiter(inputPath) {
+  const sample = await fs.promises.readFile(inputPath, { encoding: "utf8" }).catch(() => "");
+  const lines = sample
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  const candidates = ["\t", ",", ";"];
+  let best = ",";
+  let bestScore = -1;
+
+  candidates.forEach(candidate => {
+    const score = lines.reduce((sum, line) => sum + (line.split(candidate).length - 1), 0);
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  });
+
+  return bestScore > 0 ? best : ",";
+}
+
+function csvFilterOptions(delimiter) {
+  const codeMap = {
+    "\t": 9,
+    ",": 44,
+    ";": 59
+  };
+  const separatorCode = codeMap[delimiter] || 44;
+  return `${separatorCode},34,76,1`;
+}
+
+async function convertSpreadsheetToPdf(inputPath, outputPath, ext) {
+  const scriptPath = path.join(__dirname, "scripts", "spreadsheet_to_pdf.py");
+  const command = getLibreOfficeCommand();
+  const csvDelimiter = ext === ".csv" ? await detectCsvDelimiter(inputPath) : "";
+
+  if (!command || !spreadsheetProfileAvailable()) {
+    await convertOfficeToPdf(inputPath, outputPath);
+    return {
+      conversionProfile: "libreoffice-default",
+      csvDelimiter
+    };
+  }
+
+  const profileDir = path.join(uploadDir, `lo-profile-grid-${path.basename(outputPath, ".pdf")}`);
+  const port = 21000 + crypto.randomInt(10000);
+  await fs.promises.mkdir(profileDir, { recursive: true });
+
+  const listener = spawn(command, [
+    `-env:UserInstallation=${pathToFileURL(profileDir).href}`,
+    "--headless",
+    "--nologo",
+    "--nodefault",
+    "--nofirststartwizard",
+    "--nolockcheck",
+    "--norestore",
+    `--accept=socket,host=127.0.0.1,port=${port};urp;StarOffice.ComponentContext`
+  ], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      HOME: process.env.LIBREOFFICE_HOME || "/tmp",
+      TMPDIR: process.env.TMPDIR || "/tmp"
+    }
+  });
+
+  let listenerStderr = "";
+  listener.stderr.on("data", chunk => {
+    listenerStderr += chunk.toString();
+  });
+
+  try {
+    await runCommand("python3", [
+      scriptPath,
+      inputPath,
+      outputPath,
+      ext,
+      String(port),
+      csvFilterOptions(csvDelimiter)
+    ], { timeoutMs: 180000 });
+  } catch (err) {
+    console.warn(
+      "spreadsheet grid-fit conversion failed; falling back to default LibreOffice:",
+      err.message,
+      listenerStderr.trim()
+    );
+    await convertOfficeToPdf(inputPath, outputPath);
+    return {
+      conversionProfile: "libreoffice-default",
+      csvDelimiter
+    };
+  } finally {
+    listener.kill("SIGTERM");
+    fs.promises.rm(profileDir, { recursive: true, force: true }).catch(() => {});
+  }
+
+  if (!fs.existsSync(outputPath)) {
+    await convertOfficeToPdf(inputPath, outputPath);
+    return {
+      conversionProfile: "libreoffice-default",
+      csvDelimiter
+    };
+  }
+
+  return {
+    conversionProfile: "grid-fit",
+    csvDelimiter
+  };
+}
+
 function convertImageToPdf(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ autoFirstPage: false });
@@ -491,12 +628,42 @@ async function uploadOutput(filePath, publicId, contentType) {
 
 async function preparePdf(inputPath, outputPath, ext) {
   if (ext === ".pdf") {
-    return { outputPath: inputPath, converted: false, contentType: "application/pdf" };
+    return {
+      outputPath: inputPath,
+      converted: false,
+      contentType: "application/pdf",
+      documentKind: "pdf",
+      conversionProfile: "source-pdf",
+      sourceExtension: ext
+    };
   }
 
   if (imageExtensions.has(ext)) {
     await convertImageToPdf(inputPath, outputPath);
-    return { outputPath, converted: true, contentType: "application/pdf" };
+    return {
+      outputPath,
+      converted: true,
+      contentType: "application/pdf",
+      documentKind: "image",
+      conversionProfile: "image-pdf",
+      sourceExtension: ext
+    };
+  }
+
+  if (spreadsheetExtensions.has(ext)) {
+    if (!converterAvailable()) {
+      throw new Error("converter_not_available");
+    }
+    const profile = await convertSpreadsheetToPdf(inputPath, outputPath, ext);
+    return {
+      outputPath,
+      converted: true,
+      contentType: "application/pdf",
+      documentKind: "spreadsheet",
+      conversionProfile: profile.conversionProfile,
+      sourceExtension: ext,
+      csvDelimiter: profile.csvDelimiter
+    };
   }
 
   if (officeExtensions.has(ext)) {
@@ -504,7 +671,14 @@ async function preparePdf(inputPath, outputPath, ext) {
       throw new Error("converter_not_available");
     }
     await convertOfficeToPdf(inputPath, outputPath);
-    return { outputPath, converted: true, contentType: "application/pdf" };
+    return {
+      outputPath,
+      converted: true,
+      contentType: "application/pdf",
+      documentKind: "office",
+      conversionProfile: "office-pdf",
+      sourceExtension: ext
+    };
   }
 
   throw new Error("unsupported_file_type");
@@ -561,6 +735,7 @@ app.get(
       agoraRtmTokenConfigured: agoraTokenConfigured(),
       authSecretConfigured,
       converterAvailable: converterAvailable(),
+      spreadsheetProfileAvailable: spreadsheetProfileAvailable(),
       uploadField: "sampleFile",
       maxUploadMb,
       auditSchemaReady: !schemaInitError
@@ -763,6 +938,10 @@ app.post(
             metadata: {
               size: sampleFile.size,
               converted: prepared.converted,
+              documentKind: prepared.documentKind,
+              conversionProfile: prepared.conversionProfile,
+              sourceExtension: prepared.sourceExtension,
+              csvDelimiter: prepared.csvDelimiter || "",
               storageProvider,
               cloudinaryUrl: upload.secure_url || upload.url,
               cloudinaryPublicId: upload.publicId || "",
@@ -782,6 +961,10 @@ app.post(
         mimeType: sampleFile.mimetype || "",
         size: sampleFile.size,
         converted: prepared.converted,
+        documentKind: prepared.documentKind,
+        conversionProfile: prepared.conversionProfile,
+        sourceExtension: prepared.sourceExtension,
+        csvDelimiter: prepared.csvDelimiter || "",
         document
       });
     } catch (err) {

@@ -69,6 +69,7 @@ function handleDocumentMouseup(e) {
   let target = findAnnotationAtPoint(e.clientX, e.clientY);
   let {viewport, documentId} = getMetadata(svg);
   let rect = svg.getBoundingClientRect();
+  let svgWidth = Number(svg.getAttribute('width')) || rect.width;
   input = document.createElement('textarea');
   const setTextBox = () => {
     input = document.createElement('textarea');
@@ -93,14 +94,18 @@ function handleDocumentMouseup(e) {
   }
   const setNewTextBox = () => {
     setTextBox();
-    startClientY = e.clientY - rect.top;
-    startClientX = e.clientX - rect.left;
+    let pagePoint = scaleDown(svg, {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+    startClientY = pagePoint.y;
+    startClientX = pagePoint.x;
     input.style.top = `${startClientY}px`;
     input.style.left = `${startClientX}px`;
     input.style.color = _textColor;
     input.style.fontSize = `${(_textSize * viewport.scale)}px`;
     input.style.lineHeight = `${(_textSize * viewport.scale) + 10}px`;
-    input.style.width = ((rect.width * 0.9) - (startClientX)) + 'px';
+    input.style.width = ((svgWidth * 0.9) - (startClientX)) + 'px';
     perLineHeight = ((_textSize + 5) * viewport.scale);
     input.style.height = `${(perLineHeight * 2)}px`;
     svg.parentNode.appendChild(input);
@@ -126,7 +131,7 @@ function handleDocumentMouseup(e) {
       input.style.color = _textColor;
       input.style.fontSize = `${(_textSize * viewport.scale)}px`;
       input.style.lineHeight = `${(_textSize * viewport.scale) + 10}px`;
-      input.style.width = ((rect.width * 0.9) - (startClientX)) + 'px';
+      input.style.width = ((svgWidth * 0.9) - (startClientX)) + 'px';
       perLineHeight = ((_textSize + 5) * viewport.scale);
       input.style.height = `${perLineHeight * 2}px`;
       input.value = annotation.content;
@@ -229,12 +234,12 @@ function saveText(hasClose = true) {
       color: _textColor,
       tick: _tickSize,
       content: input.value
-    }, scaleDown(svg, {
+    }, {
       x: startClientX,
       y: startClientY,
       width: input.offsetWidth,
       height: input.offsetHeight * viewport.scale
-    }));
+    });
 
     if (annotationId) {
       PDFJSAnnotate.getStoreAdapter().getAnnotation(documentId, annotationId).then((saveAnnotation) => {

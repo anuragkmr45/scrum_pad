@@ -201,7 +201,9 @@ export function getAnnotationRect(el) {
 			break;
 
 		case 'text':
-			h = rect.height;
+			let ownerSvg = findSVGAtPoint(rect.left, rect.top) || findSVGContainer(el) || el.ownerSVGElement;
+			let visualScale = ownerSvg ? getSvgVisualScale(ownerSvg) : { y: 1 };
+			h = rect.height / visualScale.y;
 			w = parseInt(el.getAttribute('width'), 10); //rect.width;
 			x = parseInt(el.getAttribute('x'), 10);
 			y = parseInt(el.getAttribute('y'), 10) - LINE_OFFSET / 2 - 10;
@@ -254,6 +256,96 @@ export function getAnnotationRect(el) {
 	return result;
 }
 
+function parseSvgLength(svg, attrName) {
+	let attrValue = parseFloat(svg.getAttribute(attrName));
+	if (Number.isFinite(attrValue) && attrValue > 0) {
+		return attrValue;
+	}
+
+	let lengthValue = svg[attrName] && svg[attrName].baseVal && svg[attrName].baseVal.value;
+	if (Number.isFinite(lengthValue) && lengthValue > 0) {
+		return lengthValue;
+	}
+
+	let viewBoxValue = svg.viewBox && svg.viewBox.baseVal;
+	if (viewBoxValue) {
+		let value = attrName === 'width' ? viewBoxValue.width : viewBoxValue.height;
+		if (Number.isFinite(value) && value > 0) {
+			return value;
+		}
+	}
+
+	let { viewport } = getMetadata(svg);
+	let viewportValue = viewport && viewport[attrName];
+	if (Number.isFinite(viewportValue) && viewportValue > 0) {
+		return viewportValue;
+	}
+
+	return 1;
+}
+
+function axisForScaleKey(key) {
+	let normalized = String(key).toLowerCase();
+	if (
+		normalized === 'x' ||
+		normalized === 'x1' ||
+		normalized === 'x2' ||
+		normalized === 'left' ||
+		normalized === 'right' ||
+		normalized === 'width' ||
+		normalized === 'cx' ||
+		normalized === 'rx' ||
+		normalized === 'viewx' ||
+		normalized === 'deltax'
+	) {
+		return 'x';
+	}
+	if (
+		normalized === 'y' ||
+		normalized === 'y1' ||
+		normalized === 'y2' ||
+		normalized === 'top' ||
+		normalized === 'bottom' ||
+		normalized === 'height' ||
+		normalized === 'cy' ||
+		normalized === 'ry' ||
+		normalized === 'viewy' ||
+		normalized === 'deltay'
+	) {
+		return 'y';
+	}
+	return 'uniform';
+}
+
+/**
+ * Return the visual scale between SVG annotation coordinates and actual pixels.
+ *
+ * The whiteboard fits PDF pages with CSS zoom on tablet/laptop screens. PDF.js
+ * viewport scale does not include that zoom, so pointer and hit-test math must
+ * use the rendered SVG bounds.
+ *
+ * @param {SVGElement} svg The SVG to inspect
+ * @return {Object} x/y scale factors
+ */
+export function getSvgVisualScale(svg) {
+	if (!svg) {
+		return { x: 1, y: 1, uniform: 1 };
+	}
+
+	let rect = svg.getBoundingClientRect();
+	let width = parseSvgLength(svg, 'width');
+	let height = parseSvgLength(svg, 'height');
+	let { viewport } = getMetadata(svg);
+	let viewportScale = viewport && Number.isFinite(viewport.scale) && viewport.scale > 0 ? viewport.scale : 1;
+	let x = width > 0 && rect.width > 0 ? viewportScale * (rect.width / width) : viewportScale;
+	let y = height > 0 && rect.height > 0 ? viewportScale * (rect.height / height) : viewportScale;
+
+	if (!Number.isFinite(x) || x <= 0) x = 1;
+	if (!Number.isFinite(y) || y <= 0) y = 1;
+
+	return { x, y, uniform: (x + y) / 2 };
+}
+
 /**
  * Adjust scale from normalized scale (100%) to rendered scale.
  *
@@ -263,10 +355,11 @@ export function getAnnotationRect(el) {
  */
 export function scaleUp(svg, rect) {
 	let result = {};
-	let { viewport } = getMetadata(svg);
+	let visualScale = getSvgVisualScale(svg);
 
 	Object.keys(rect).forEach((key) => {
-		result[key] = rect[key] * viewport.scale;
+		let axis = axisForScaleKey(key);
+		result[key] = rect[key] * visualScale[axis];
 	});
 
 	return result;
@@ -281,9 +374,10 @@ export function scaleUp(svg, rect) {
  */
 export function scaleDown(svg, rect) {
 	let result = {};
-	let { viewport } = getMetadata(svg);
+	let visualScale = getSvgVisualScale(svg);
 	Object.keys(rect).forEach((key) => {
-		result[key] = rect[key] / viewport.scale;
+		let axis = axisForScaleKey(key);
+		result[key] = rect[key] / visualScale[axis];
 	});
 
 	return result;
