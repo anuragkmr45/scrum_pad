@@ -1,4 +1,5 @@
 import React, { useMemo, useContext, useEffect, useState, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import Icon from '../icon';
 import PollCard from '../../components/poll/index'
 import usePollData from '../../hooks/use-poll-data';
@@ -729,6 +730,7 @@ export default function Control({
   const presentationMode = Boolean(isPresentationMode || fileState.isPresentationMode);
   const viewerZoom = Math.min(2.75, Math.max(0.5, Number(fileState.viewerZoom) || 1));
   const viewerRotation = ((Number(fileState.viewerRotation) || 0) % 360 + 360) % 360;
+  const modalRoot = typeof document !== 'undefined' ? document.body : null;
 
   const refreshBoardScale = (zoomOverride?: number) => {
     if (typeof (window as any).__hexscrumUpdateBoardScale === 'function') {
@@ -1849,7 +1851,7 @@ export default function Control({
 	            </div>
 	          </div>
 	        </div> : null}
-	      {exportDialogOpen ?
+	      {exportDialogOpen && modalRoot ? ReactDOM.createPortal(
         <div className="export-modal-backdrop" role="presentation">
           <div className="export-modal-panel" role="dialog" aria-modal="true" aria-labelledby="exportPdfTitle">
             <div className="export-modal-header">
@@ -2011,7 +2013,9 @@ export default function Control({
               </button>
             </div>
           </div>
-        </div> : null}
+        </div>,
+        modalRoot
+      ) : null}
     </>
   )
 };

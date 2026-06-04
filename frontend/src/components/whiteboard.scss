@@ -1639,11 +1639,12 @@ body.hexscrum-presentation-active {
 .export-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 2500;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 28px;
+  overflow: hidden;
   background: rgba(37, 36, 34, 0.28);
   backdrop-filter: blur(18px) saturate(1.15);
   animation: glassFadeIn 180ms ease-out;
@@ -2036,16 +2037,29 @@ body.hexscrum-presentation-active {
 }
 
 .export-modal-panel {
+  --export-modal-pad: 22px;
   width: min(720px, calc(100vw - 48px));
-  max-height: calc(100vh - 64px);
-  overflow: auto;
-  padding: 22px;
+  max-height: min(860px, calc(100dvh - 56px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding: var(--export-modal-pad);
   border: 1px solid rgba(255, 252, 242, 0.46);
   border-radius: 18px;
   background: linear-gradient(145deg, rgba(255, 252, 242, 0.88), rgba(204, 197, 185, 0.72));
   box-shadow: 0 32px 90px rgba(37, 36, 34, 0.24);
   color: #252422;
   animation: glassPanelIn 220ms cubic-bezier(0.2, 0.9, 0.2, 1);
+  box-sizing: border-box;
+  scrollbar-width: thin;
+}
+
+@supports not (height: 100dvh) {
+  .export-modal-panel {
+    max-height: calc(100vh - 56px);
+  }
 }
 
 .export-modal-header,
@@ -2240,6 +2254,14 @@ body.hexscrum-presentation-active {
 }
 
 .export-modal-header {
+  position: sticky;
+  top: calc(var(--export-modal-pad) * -1);
+  z-index: 2;
+  margin: calc(var(--export-modal-pad) * -1) calc(var(--export-modal-pad) * -1) 18px;
+  padding: var(--export-modal-pad) var(--export-modal-pad) 14px;
+  border-bottom: 1px solid rgba(64, 61, 57, 0.1);
+  background: linear-gradient(145deg, rgba(255, 252, 242, 0.94), rgba(204, 197, 185, 0.82));
+  backdrop-filter: blur(18px) saturate(1.12);
   margin-bottom: 18px;
 
   span {
@@ -2374,8 +2396,14 @@ body.hexscrum-presentation-active {
 }
 
 .export-modal-footer {
-  padding-top: 16px;
+  position: sticky;
+  bottom: calc(var(--export-modal-pad) * -1);
+  z-index: 2;
+  margin: 16px calc(var(--export-modal-pad) * -1) calc(var(--export-modal-pad) * -1);
+  padding: 16px var(--export-modal-pad) var(--export-modal-pad);
   border-top: 1px solid rgba(64, 61, 57, 0.12);
+  background: linear-gradient(145deg, rgba(255, 252, 242, 0.94), rgba(204, 197, 185, 0.82));
+  backdrop-filter: blur(18px) saturate(1.12);
 
   span {
     color: rgba(37, 36, 34, 0.66);
@@ -2419,7 +2447,44 @@ body.hexscrum-presentation-active {
 
 @media screen and (max-width: 760px) {
   .export-modal-backdrop {
-    padding: 16px;
+    align-items: stretch;
+    padding: 10px;
+  }
+
+  .export-modal-panel {
+    --export-modal-pad: 16px;
+    width: calc(100vw - 20px);
+    max-height: calc(100dvh - 20px);
+    border-radius: 16px;
+  }
+
+  @supports not (height: 100dvh) {
+    .export-modal-panel {
+      max-height: calc(100vh - 20px);
+    }
+  }
+
+  .export-modal-header,
+  .export-section-title,
+  .export-modal-footer {
+    align-items: stretch;
+  }
+
+  .export-modal-header {
+    gap: 10px;
+
+    h2 {
+      font-size: 24px;
+      line-height: 30px;
+    }
+  }
+
+  .export-modal-footer {
+    flex-direction: column;
+
+    .primary {
+      width: 100%;
+    }
   }
 
   .export-rotation-grid {
@@ -2428,6 +2493,10 @@ body.hexscrum-presentation-active {
 
   .export-preview-section .export-preview-card {
     grid-template-columns: 1fr;
+  }
+
+  .export-segmented {
+    border-radius: 14px;
   }
 
   .upload-progress-overlay {
@@ -2486,6 +2555,22 @@ body.hexscrum-presentation-active {
 }
 
 @media screen and (min-width: 761px) and (max-width: 1180px) {
+  .export-modal-backdrop {
+    padding: 14px;
+  }
+
+  .export-modal-panel {
+    --export-modal-pad: 18px;
+    width: min(760px, calc(100vw - 28px));
+    max-height: calc(100dvh - 28px);
+  }
+
+  @supports not (height: 100dvh) {
+    .export-modal-panel {
+      max-height: calc(100vh - 28px);
+    }
+  }
+
   .media-board .pdfViewer {
     padding: 20px var(--hexscrum-board-right-gutter) 132px var(--hexscrum-board-left-gutter);
   }
