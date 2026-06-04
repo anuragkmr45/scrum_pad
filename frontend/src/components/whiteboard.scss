@@ -967,6 +967,129 @@ div#remove_page:after{
   margin: 0 auto;
 }
 
+.presentation-status-bar {
+  display: none;
+}
+
+body.hexscrum-presentation-active {
+  background: #252422;
+}
+
+.media-board.presentation-mode {
+  overflow: hidden;
+  padding-bottom: 96px;
+  background:
+    linear-gradient(180deg, rgba(37, 36, 34, 0.98), rgba(64, 61, 57, 0.96));
+  color: #fffcf2;
+}
+
+.media-board.presentation-mode #main-container {
+  min-height: 100%;
+}
+
+.media-board.presentation-mode .pdfViewer {
+  min-height: 100%;
+  padding: clamp(72px, 8vh, 96px) var(--hexscrum-board-right-gutter) 118px var(--hexscrum-board-left-gutter);
+  justify-content: center;
+}
+
+.media-board.presentation-mode .pdfViewer.active .page {
+  display: none;
+  margin: 0 auto;
+}
+
+.media-board.presentation-mode .pdfViewer.active .page.is-presentation-page {
+  display: block;
+  border-radius: 6px;
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(255, 252, 242, 0.16);
+}
+
+.media-board.presentation-mode .presentation-status-bar {
+  pointer-events: none;
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 42;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 160px));
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 252, 242, 0.18);
+  border-radius: 999px;
+  background: rgba(37, 36, 34, 0.72);
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(22px) saturate(1.14);
+  animation: glassPanelIn 180ms ease-out;
+  box-sizing: border-box;
+}
+
+.presentation-status-bar strong,
+.presentation-status-bar span {
+  min-width: 0;
+}
+
+.presentation-status-bar strong {
+  overflow: hidden;
+  color: #fffcf2;
+  font-size: 14px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presentation-kicker,
+.presentation-slide-count {
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.presentation-kicker {
+  padding: 8px 11px;
+  background: #eb5e28;
+  color: #fffcf2;
+}
+
+.presentation-slide-count {
+  padding: 8px 10px;
+  background: rgba(255, 252, 242, 0.12);
+  color: #ccc5b9;
+}
+
+.media-board.presentation-mode .PageDetail {
+  display: none;
+}
+
+.media-board.presentation-mode .menu {
+  border: 1px solid rgba(255, 252, 242, 0.16);
+  background-color: rgba(37, 36, 34, 0.78);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(20px) saturate(1.12);
+}
+
+.media-board.presentation-mode .controls-container .controls {
+  border-color: rgba(255, 252, 242, 0.22);
+  background: rgba(255, 252, 242, 0.9);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.34);
+}
+
+.media-board.presentation-mode .control-collapse-toggle {
+  border-color: rgba(255, 252, 242, 0.26);
+  background: rgba(255, 252, 242, 0.88);
+}
+
+.media-board.presentation-mode .presentation-control.active svg {
+  color: #eb5e28;
+}
+
 .noselect {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
@@ -1989,6 +2112,25 @@ div#remove_page:after{
     padding: 16px var(--hexscrum-board-right-gutter) 126px var(--hexscrum-board-left-gutter);
   }
 
+  .media-board.presentation-mode .pdfViewer {
+    padding: 74px var(--hexscrum-board-right-gutter) 112px var(--hexscrum-board-left-gutter);
+  }
+
+  .media-board.presentation-mode .presentation-status-bar {
+    top: 10px;
+    width: calc(100vw - 104px);
+    grid-template-columns: 1fr auto;
+    border-radius: 18px;
+  }
+
+  .media-board.presentation-mode .presentation-kicker {
+    display: none;
+  }
+
+  .presentation-status-bar strong {
+    font-size: 13px;
+  }
+
   .media-board .layer {
     left: 6px;
     max-height: calc(100vh - 176px);
@@ -2019,6 +2161,14 @@ div#remove_page:after{
 @media screen and (min-width: 761px) and (max-width: 1180px) {
   .media-board .pdfViewer {
     padding: 20px var(--hexscrum-board-right-gutter) 132px var(--hexscrum-board-left-gutter);
+  }
+
+  .media-board.presentation-mode .pdfViewer {
+    padding: 78px var(--hexscrum-board-right-gutter) 118px var(--hexscrum-board-left-gutter);
+  }
+
+  .media-board.presentation-mode .presentation-status-bar {
+    width: min(680px, calc(100vw - 132px));
   }
 
   .media-board .layer {

@@ -231,27 +231,71 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
 
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPage, setTotalPages] = useState(1);
+  const [presentationMode, setPresentationMode] = useState(false);
+  const currentPageRef = useRef(currentPage);
+  const presentationModeRef = useRef(presentationMode);
   const scrollSyncTimer = useRef<number | null>(null);
   const lastScrollSentAt = useRef(0);
+
+  const updatePresentationPageClass = (pageOverride?: any, modeOverride?: boolean) => {
+    const board = document.getElementById('Board');
+    if (!board) return;
+
+    const presentationEnabled = typeof modeOverride === 'boolean'
+      ? modeOverride
+      : presentationModeRef.current;
+    const activeViewer = board.querySelector('.pdfViewer.active') as HTMLElement | null;
+    const pageNumber = Math.max(1, Number(pageOverride ?? currentPageRef.current) || 1);
+    const targetPage = presentationEnabled && activeViewer
+      ? activeViewer.querySelector(`#pageContainer${pageNumber}`) || activeViewer.querySelector('.page')
+      : null;
+
+    board
+      .querySelectorAll('.page.is-presentation-page')
+      .forEach((page) => {
+        if (page !== targetPage) {
+          page.classList.remove('is-presentation-page');
+        }
+      });
+
+    if (targetPage && !targetPage.classList.contains('is-presentation-page')) {
+      targetPage.classList.add('is-presentation-page');
+    }
+  };
 
   const updateBoardScale = () => {
     const board = document.getElementById('Board') as HTMLElement | null;
     if (!board) return;
 
     const activeViewer = board.querySelector('.pdfViewer.active') as HTMLElement | null;
-    const activePage = activeViewer && activeViewer.querySelector('.page') as HTMLElement | null;
+    const activePage = activeViewer && (
+      presentationMode
+        ? activeViewer.querySelector('.page.is-presentation-page') || activeViewer.querySelector('.page')
+        : activeViewer.querySelector('.page')
+    ) as HTMLElement | null;
     const pageWidth = activePage
       ? Number(activePage.getAttribute('data-pdf-width')) || activePage.offsetWidth
       : 0;
+    const pageHeight = activePage
+      ? Number(activePage.getAttribute('data-pdf-height')) || activePage.offsetHeight
+      : 0;
     const boardWidth = board.clientWidth || window.innerWidth;
+    const boardHeight = board.clientHeight || window.innerHeight;
     const compact = window.matchMedia('(max-width: 1180px)').matches;
     const verySmall = window.matchMedia('(max-width: 680px)').matches;
-    const leftGutter = compact ? (verySmall ? 78 : 98) : 126;
-    const rightGutter = compact ? (verySmall ? 18 : 34) : 72;
+    const leftGutter = presentationMode
+      ? (verySmall ? 74 : compact ? 90 : 112)
+      : compact ? (verySmall ? 78 : 98) : 126;
+    const rightGutter = presentationMode
+      ? (verySmall ? 16 : compact ? 28 : 48)
+      : compact ? (verySmall ? 18 : 34) : 72;
     const availableWidth = Math.max(260, boardWidth - leftGutter - rightGutter);
-    const scale = compact && pageWidth
-      ? Math.min(1, Math.max(0.52, availableWidth / pageWidth))
-      : 1;
+    const availableHeight = Math.max(260, boardHeight - (presentationMode ? 190 : 0));
+    const scale = presentationMode && pageWidth && pageHeight
+      ? Math.min(1, Math.max(0.42, Math.min(availableWidth / pageWidth, availableHeight / pageHeight)))
+      : compact && pageWidth
+        ? Math.min(1, Math.max(0.52, availableWidth / pageWidth))
+        : 1;
 
     board.style.setProperty('--hexscrum-board-scale', scale.toFixed(3));
     board.style.setProperty('--hexscrum-board-left-gutter', `${leftGutter}px`);
@@ -300,6 +344,62 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
   },[pdfFiles]);
 
   useEffect(() => {
+    currentPageRef.current = currentPage;
+    presentationModeRef.current = presentationMode;
+  }, [currentPage, presentationMode]);
+
+  useEffect(() => {
+    const previousModeHandler = (window as any).__hexscrumSetPresentationMode;
+    const previousPageHandler = (window as any).__hexscrumSetPresentationPage;
+
+    (window as any).__hexscrumSetPresentationMode = (enabled: boolean) => {
+      const nextEnabled = Boolean(enabled);
+      presentationModeRef.current = nextEnabled;
+      setPresentationMode(nextEnabled);
+      if (enabled) {
+        setCurrentPage((page) => {
+          const nextPage = Math.max(1, Number(page) || 1);
+          currentPageRef.current = nextPage;
+          return nextPage;
+        });
+      }
+      window.requestAnimationFrame(() => updatePresentationPageClass(undefined, nextEnabled));
+    };
+
+    (window as any).__hexscrumSetPresentationPage = (page: any) => {
+      const nextPage = Math.max(1, Number(page) || 1);
+      currentPageRef.current = nextPage;
+      setCurrentPage(nextPage);
+      window.requestAnimationFrame(() => updatePresentationPageClass(nextPage));
+    };
+
+    return () => {
+      if (previousModeHandler) {
+        (window as any).__hexscrumSetPresentationMode = previousModeHandler;
+      } else {
+        delete (window as any).__hexscrumSetPresentationMode;
+      }
+
+      if (previousPageHandler) {
+        (window as any).__hexscrumSetPresentationPage = previousPageHandler;
+      } else {
+        delete (window as any).__hexscrumSetPresentationPage;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle('hexscrum-presentation-active', presentationMode);
+    updatePresentationPageClass();
+    window.requestAnimationFrame(updateBoardScale);
+
+    return () => {
+      document.body.classList.remove('hexscrum-presentation-active');
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presentationMode, currentPage, totalPage, pdfFiles.length]);
+
+  useEffect(() => {
     updateBoardScale();
     const board = document.getElementById('Board');
     if (!board) return undefined;
@@ -311,7 +411,10 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
     resizeObserver && resizeObserver.observe(board);
 
     const mutationObserver = new MutationObserver(() => {
-      window.requestAnimationFrame(updateBoardScale);
+      window.requestAnimationFrame(() => {
+        updatePresentationPageClass();
+        updateBoardScale();
+      });
     });
     mutationObserver.observe(board, {
       subtree: true,
@@ -333,7 +436,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
       window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdfFiles.length, currentPage, location.pathname]);
+  }, [pdfFiles.length, currentPage, location.pathname, presentationMode]);
 
   useEffect(() => {
     // disable all pdf effect on grandboard false
@@ -417,7 +520,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
     if (VisibleElement !== null) {
       let VisibleElementId = VisibleElement.id
       let pageNumber = VisibleElementId.substring(13);
-      setCurrentPage(pageNumber);
+      setCurrentPage(Number(pageNumber) || 1);
     }
     } catch (err) {
         // error handler
@@ -426,7 +529,12 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
 }
 
   return (
-    <div id='Board' className={`media-board ${drawable}`} onScroll={handleScroll}>
+    <div id='Board' className={`media-board ${drawable} ${presentationMode ? 'presentation-mode' : ''}`} onScroll={handleScroll}>
+      <div className="presentation-status-bar" aria-hidden={!presentationMode}>
+        <span className="presentation-kicker">Slideshow</span>
+        <strong>{roomStore.state.course.roomName || 'Workspace'}</strong>
+        <span className="presentation-slide-count">Slide {currentPage}/{totalPage}</span>
+      </div>
       {
         <>
         <fileContext.Provider value={{
@@ -447,9 +555,22 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
         {children ? children : null}
       </div>
       { showControl ?
-      <fileContext.Provider value={{pdfFiles: pdfFiles, fileDispatch: dispatch, setTotalPages: setTotalPages, canAnnotate, canManageWorkspace}}>
+      <fileContext.Provider value={{
+        pdfFiles: pdfFiles,
+        fileDispatch: dispatch,
+        setTotalPages: setTotalPages,
+        canAnnotate,
+        canManageWorkspace,
+        currentPage,
+        totalPage,
+        setCurrentPage,
+        isPresentationMode: presentationMode,
+        setPresentationMode,
+      }}>
       <Control
         isHost={isHost}
+        isPresentationMode={presentationMode}
+        onPresentationModeChange={setPresentationMode}
         notice={globalState.notice}
         role={role}
         onClick={handlePageTool}/>

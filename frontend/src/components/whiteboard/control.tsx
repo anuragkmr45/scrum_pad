@@ -30,6 +30,8 @@ import KeyboardArrowDownIcon from '@material-ui/icons/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@material-ui/icons/KeyboardArrowUp';
 import PeopleIcon from '@material-ui/icons/People';
 import ShareIcon from '@material-ui/icons/Share';
+import SlideshowIcon from '@material-ui/icons/Slideshow';
+import FullscreenExitIcon from '@material-ui/icons/FullscreenExit';
 import { undoAnnotations, redoAnnotations, getAnnotationHistoryState, addHistoryStateListener } from '../../utils/annotation-history';
 import { getHexscrumProfile, getWorkspaceId, getWorkspacePresence, inviteWorkspaceUser, listWorkspaceMembers, searchUsers, updateWorkspaceMemberStatus, workspaceJoinLink } from '../../utils/hexscrum-api';
 
@@ -69,9 +71,11 @@ interface NoticeProps {
 
 interface ControlProps {
   isHost?: boolean
+  isPresentationMode?: boolean
   role: string
   notice?: NoticeProps
   onClick: (evt: any, type: string) => void
+  onPresentationModeChange?: (enabled: boolean) => void
 }
 
 type ExportOrientation = 'auto' | 'portrait' | 'landscape';
@@ -106,6 +110,16 @@ type WorkspaceMemberRow = {
   color: string
   status: string
 }
+
+function syncPresentationPageAfterCanvasChange(pageNumber: number = 1) {
+  const pageSync = (window as any).__hexscrumSetPresentationPage;
+  if (!document.body.classList.contains('hexscrum-presentation-active') || typeof pageSync !== 'function') {
+    return;
+  }
+
+  window.setTimeout(() => pageSync(pageNumber), 80);
+}
+
 export const toggleNext = (
   setCanvasNumber?: any,
   pdfFiles: any = [],
@@ -143,6 +157,7 @@ export const toggleNext = (
       let totalPages = next?.childElementCount;
       setTotalPages(totalPages)
     }
+    syncPresentationPageAfterCanvasChange(1);
   }
 }
 
@@ -185,6 +200,7 @@ export const togglePrev = (
       let totalPages = previous?.childElementCount;
       setTotalPages(totalPages)
     }
+    syncPresentationPageAfterCanvasChange(1);
 
   }
 }
@@ -219,7 +235,9 @@ export const toggleFirstLast = (
   });
 
   current.classList.remove('active');
-  document.querySelector(`.pdfViewer:${item}-child`)!.classList.add('active');
+  const targetViewer = document.querySelector(`.pdfViewer:${item}-child`)!;
+  targetViewer.classList.add('active');
+  let targetTotalPages = targetViewer.childElementCount || 1;
 
   if (typeof setCanvasNumber === 'function' && Array.isArray(pdfFiles)) {
 
@@ -246,9 +264,11 @@ export const toggleFirstLast = (
     if (typeof setTotalPages === 'function') {
       // set total pages for current active canvas
       totalPages = document.getElementsByClassName('pdfViewer active')[0].childElementCount;
+      targetTotalPages = totalPages || targetTotalPages;
       setTotalPages(totalPages)
     }
   }
+  syncPresentationPageAfterCanvasChange(item === 'last' ? targetTotalPages : 1);
 }
 
 function getExportCanvasOptions(): ExportCanvasOption[] {
@@ -387,10 +407,19 @@ function getExportPageElement(option: ExportCanvasOption) {
   return viewer.querySelector(`.page[data-page-number="${option.pageNumber}"]`) as HTMLElement | null;
 }
 
+function isTextEntryTarget(target: EventTarget | null) {
+  const node = target as HTMLElement | null;
+  if (!node) return false;
+  const tagName = (node.tagName || '').toLowerCase();
+  return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || node.isContentEditable;
+}
+
 export default function Control({
   onClick,
   role,
   isHost,
+  isPresentationMode,
+  onPresentationModeChange,
   notice,
 }: ControlProps) {
   const location = useLocation();
@@ -443,6 +472,7 @@ export default function Control({
   const canManageWorkspace = Boolean(fileState.canManageWorkspace || role === 'teacher');
   const canManageCanvas = canManageWorkspace;
   const canExportWorkspace = canAnnotate || canManageWorkspace;
+  const presentationMode = Boolean(isPresentationMode || fileState.isPresentationMode);
 
   useEffect(() => {
     const removeListener = addHistoryStateListener((event: any) => {
@@ -517,6 +547,138 @@ export default function Control({
       roomStore._state.me.uid
     );
   };
+
+  const requestPresentationFullscreen = (enabled: boolean) => {
+    const board = document.getElementById('Board') as any;
+    const documentRef = document as any;
+
+    if (enabled && board && !document.fullscreenElement) {
+      const request =
+        board.requestFullscreen ||
+        board.webkitRequestFullscreen ||
+        board.mozRequestFullScreen ||
+        board.msRequestFullscreen;
+      if (request) {
+        const result = request.call(board);
+        result && result.catch && result.catch(() => {});
+      }
+      return;
+    }
+
+    if (!enabled && document.fullscreenElement === board) {
+      const exit =
+        documentRef.exitFullscreen ||
+        documentRef.webkitExitFullscreen ||
+        documentRef.mozCancelFullScreen ||
+        documentRef.msExitFullscreen;
+      exit && exit.call(documentRef);
+    }
+  };
+
+  const setPresentationMode = (enabled: boolean, shouldBroadcast: boolean = true) => {
+    onPresentationModeChange && onPresentationModeChange(enabled);
+    if (typeof fileState.setPresentationMode === 'function') {
+      fileState.setPresentationMode(enabled);
+    }
+    if (typeof (window as any).__hexscrumSetPresentationMode === 'function') {
+      (window as any).__hexscrumSetPresentationMode(enabled);
+    }
+    requestPresentationFullscreen(enabled);
+    if (shouldBroadcast) {
+      sendToRemote("", "", "presentation-mode", enabled ? "on" : "off");
+    }
+    globalStore.showToast({
+      type: 'notice-board',
+      message: enabled ? 'Slideshow started' : 'Slideshow ended',
+    });
+  };
+
+  const activeViewer = () => document.querySelector('.pdfViewer.active') as HTMLElement | null;
+
+  const activeSlideCount = () => {
+    const viewer = activeViewer();
+    return viewer ? viewer.querySelectorAll('.page').length || 1 : Number(fileState.totalPage) || 1;
+  };
+
+  const setPresentationSlide = (pageNumber: number, shouldBroadcast: boolean = true) => {
+    const total = activeSlideCount();
+    const nextPage = Math.min(total, Math.max(1, Number(pageNumber) || 1));
+    if (typeof (window as any).__hexscrumSetPresentationPage === 'function') {
+      (window as any).__hexscrumSetPresentationPage(nextPage);
+    } else if (typeof fileState.setCurrentPage === 'function') {
+      fileState.setCurrentPage(nextPage);
+    }
+    if (shouldBroadcast) {
+      sendToRemote("", "", "presentation-slide", nextPage);
+    }
+  };
+
+  const goToNextPresentationSlide = () => {
+    const current = Math.max(1, Number(fileState.currentPage) || 1);
+    const total = activeSlideCount();
+    if (current < total) {
+      setPresentationSlide(current + 1);
+      return;
+    }
+
+    if (currentCanvasNumber < totalCanvas) {
+      toggleNext(setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages);
+      window.setTimeout(() => setPresentationSlide(1), 60);
+    }
+  };
+
+  const goToPreviousPresentationSlide = () => {
+    const current = Math.max(1, Number(fileState.currentPage) || 1);
+    if (current > 1) {
+      setPresentationSlide(current - 1);
+      return;
+    }
+
+    const currentViewer = activeViewer();
+    const previousViewer = currentViewer && currentViewer.previousElementSibling as HTMLElement | null;
+    if (previousViewer) {
+      const previousTotal = previousViewer.querySelectorAll('.page').length || 1;
+      togglePrev(setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages);
+      window.setTimeout(() => setPresentationSlide(previousTotal), 60);
+    }
+  };
+
+  const goToFirstPresentationSlide = () => {
+    setPresentationSlide(1);
+  };
+
+  const goToLastPresentationSlide = () => {
+    setPresentationSlide(activeSlideCount());
+  };
+
+  useEffect(() => {
+    if (!presentationMode) return undefined;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isTextEntryTarget(event.target)) return;
+
+      if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') {
+        event.preventDefault();
+        goToNextPresentationSlide();
+      } else if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+        event.preventDefault();
+        goToPreviousPresentationSlide();
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        goToFirstPresentationSlide();
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        goToLastPresentationSlide();
+      } else if (event.key === 'Escape' && canManageWorkspace) {
+        event.preventDefault();
+        setPresentationMode(false);
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presentationMode, currentCanvasNumber, totalCanvas, fileState.currentPage, fileState.totalPage]);
 
   const openExportDialog = () => {
     const canvases = getExportCanvasOptions();
@@ -1089,26 +1251,34 @@ export default function Control({
             {canManageCanvas ?
               <>
                 <div className="control-button">
-                  <FirstPageIcon onClick={() => toggleFirstLast('first', setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages)}>
+                  <FirstPageIcon onClick={() => presentationMode
+                    ? goToFirstPresentationSlide()
+                    : toggleFirstLast('first', setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages)}>
                   </FirstPageIcon>
-                  <span className="tooltiptext">First Canvas</span>
+                  <span className="tooltiptext">{presentationMode ? 'First slide' : 'First Canvas'}</span>
                 </div>
 
                 <div className="control-button">
-                  <ArrowBackIosIcon onClick={() => togglePrev(setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages)} />
-                  <span className="tooltiptext">Previous Canvas</span>
+                  <ArrowBackIosIcon onClick={() => presentationMode
+                    ? goToPreviousPresentationSlide()
+                    : togglePrev(setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages)} />
+                  <span className="tooltiptext">{presentationMode ? 'Previous slide' : 'Previous Canvas'}</span>
                 </div>
                 <div className="current_page">
-                  <span>{currentCanvasNumber}/{totalCanvas}</span>
+                  <span>{presentationMode ? `${fileState.currentPage || 1}/${fileState.totalPage || 1}` : `${currentCanvasNumber}/${totalCanvas}`}</span>
                 </div>
                 <div className="control-button">
-                  <ArrowForwardIosIcon onClick={() => toggleNext(setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages)} />
-                  <span className="tooltiptext">Next Canvas</span>
+                  <ArrowForwardIosIcon onClick={() => presentationMode
+                    ? goToNextPresentationSlide()
+                    : toggleNext(setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages)} />
+                  <span className="tooltiptext">{presentationMode ? 'Next slide' : 'Next Canvas'}</span>
                 </div>
 
                 <div className="control-button">
-                  <LastPageIcon onClick={() => toggleFirstLast('last', setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages)} />
-                  <span className="tooltiptext">Last Canvas</span>
+                  <LastPageIcon onClick={() => presentationMode
+                    ? goToLastPresentationSlide()
+                    : toggleFirstLast('last', setCanvasNumber, fileState.pdfFiles, fileState.setTotalPages)} />
+                  <span className="tooltiptext">{presentationMode ? 'Last slide' : 'Last Canvas'}</span>
                 </div>
 
                 <div className="control-button">
@@ -1137,6 +1307,14 @@ export default function Control({
               <div className='control-button'>
                 <GetAppIcon onClick={openExportDialog} />
                 <span className="tooltiptext">Export annotated PDF</span>
+              </div> : null}
+            {canManageWorkspace ?
+              <div className={`control-button presentation-control ${presentationMode ? 'active' : ''}`}>
+                {presentationMode ?
+                  <FullscreenExitIcon onClick={() => setPresentationMode(false)} /> :
+                  <SlideshowIcon onClick={() => setPresentationMode(true)} />
+                }
+                <span className="tooltiptext">{presentationMode ? 'Exit slideshow' : 'Present slideshow'}</span>
               </div> : null}
             {canManageWorkspace ?
               <div className='control-button'>

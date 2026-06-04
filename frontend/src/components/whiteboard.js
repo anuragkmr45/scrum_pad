@@ -589,6 +589,18 @@ const Whiteboard = () => {
             }
             break
         }
+        case 'presentation-mode': {
+            if (typeof window.__hexscrumSetPresentationMode === 'function') {
+              window.__hexscrumSetPresentationMode(annotate.annotationId === 'on');
+            }
+            break;
+        }
+        case 'presentation-slide': {
+            if (typeof window.__hexscrumSetPresentationPage === 'function') {
+              window.__hexscrumSetPresentationPage(annotate.annotationId);
+            }
+            break;
+        }
         default:
       }
     } catch (err) {
