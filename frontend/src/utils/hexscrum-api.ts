@@ -146,7 +146,17 @@ export async function exportSpreadsheetDocument(workspaceId: string, documentId:
     } catch (err) {}
     throw new Error(message);
   }
-  return response.blob();
+  const disposition = response.headers.get('Content-Disposition') || response.headers.get('content-disposition') || '';
+  const contentType = response.headers.get('Content-Type') || response.headers.get('content-type') || '';
+  const filenameMatch = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^"]+)"?/i);
+  const fileName = filenameMatch
+    ? decodeURIComponent(filenameMatch[1] || filenameMatch[2] || '')
+    : '';
+  return {
+    blob: await response.blob(),
+    fileName,
+    contentType,
+  };
 }
 
 export function getWorkspaceJoinParam(routeSearch: string = '') {

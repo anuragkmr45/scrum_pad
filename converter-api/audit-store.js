@@ -1566,6 +1566,62 @@ function spreadsheetRangeFromOp(op) {
   };
 }
 
+function normalizeSpreadsheetOverlay(overlay, sheetId) {
+  if (!overlay || !overlay.id) return null;
+  const type = String(overlay.type || "");
+  if (!["pen", "line", "rectangle", "ellipse", "text", "note"].includes(type)) return null;
+  const normalized = {
+    ...overlay,
+    id: String(overlay.id),
+    type,
+    sheetId: String(overlay.sheetId || sheetId || ""),
+    color: normalizeSpreadsheetColor(overlay.color, "#EB5E28"),
+    strokeWidth: Math.max(1, Math.min(16, Number(overlay.strokeWidth) || 2)),
+    createdAt: overlay.createdAt || nowIso()
+  };
+  if (Array.isArray(overlay.points)) {
+    normalized.points = overlay.points
+      .slice(0, 10000)
+      .map(point => ({
+        x: Math.max(0, Number(point.x) || 0),
+        y: Math.max(0, Number(point.y) || 0)
+      }));
+  }
+  ["x", "y", "x2", "y2", "width", "height"].forEach(key => {
+    if (overlay[key] !== undefined) normalized[key] = Math.max(0, Number(overlay[key]) || 0);
+  });
+  if (overlay.text !== undefined) {
+    normalized.text = String(overlay.text || "").slice(0, 2000);
+  }
+  return normalized;
+}
+
+function applySpreadsheetOverlayOperation(model, operation, sheet) {
+  sheet.overlays = Array.isArray(sheet.overlays) ? sheet.overlays : [];
+  const type = String(operation.type || "");
+  const overlayId = String(operation.overlayId || (operation.overlay && operation.overlay.id) || "");
+
+  if (type === "clearOverlays") {
+    sheet.overlays = [];
+    return model;
+  }
+
+  if (type === "deleteOverlay") {
+    if (!overlayId) return model;
+    sheet.overlays = sheet.overlays.filter(item => String(item.id) !== overlayId);
+    return model;
+  }
+
+  if (type === "addOverlay" || type === "updateOverlay") {
+    const overlay = normalizeSpreadsheetOverlay(operation.overlay || operation, sheet.id);
+    if (!overlay) return model;
+    const existingIndex = sheet.overlays.findIndex(item => String(item.id) === overlay.id);
+    if (existingIndex === -1) sheet.overlays.push(overlay);
+    else sheet.overlays[existingIndex] = { ...sheet.overlays[existingIndex], ...overlay };
+  }
+  return model;
+}
+
 function applySpreadsheetOperation(model, operation) {
   const op = operation || {};
   const sheet = findSpreadsheetSheet(model, op.sheetId || op.sheet_id);
@@ -1574,6 +1630,11 @@ function applySpreadsheetOperation(model, operation) {
   sheet.cells = sheet.cells || {};
   sheet.rowHeights = sheet.rowHeights || {};
   sheet.columnWidths = sheet.columnWidths || {};
+  sheet.overlays = Array.isArray(sheet.overlays) ? sheet.overlays : [];
+
+  if (op.layer === "overlay") {
+    return applySpreadsheetOverlayOperation(model, op, sheet);
+  }
 
   const type = String(op.type || "").trim();
   if (type === "setRowHeight") {

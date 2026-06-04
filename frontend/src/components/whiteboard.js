@@ -255,7 +255,12 @@ const Whiteboard = () => {
         key={`${value}`}
       >
         {spreadsheetMeta ?
-          <SpreadsheetReviewCanvas fileUrl={String(value)} meta={spreadsheetMeta} /> :
+          <SpreadsheetReviewCanvas
+            fileUrl={String(value)}
+            meta={spreadsheetMeta}
+            viewerZoom={fileState.viewerZoom}
+            viewerRotation={fileState.viewerRotation}
+          /> :
           null}
       </div>
     );
@@ -675,6 +680,17 @@ const Whiteboard = () => {
         }
         case 'spreadsheet-op': {
             window.dispatchEvent(new CustomEvent('hexscrum:spreadsheet-op', {
+              detail: {
+                documentId,
+                operation: annotationPayload && annotationPayload.operation,
+                revision: annotationPayload && annotationPayload.revision,
+                senderUid: annotate.senderUid,
+              },
+            }));
+            break;
+        }
+        case 'spreadsheet-overlay-op': {
+            window.dispatchEvent(new CustomEvent('hexscrum:spreadsheet-overlay-op', {
               detail: {
                 documentId,
                 operation: annotationPayload && annotationPayload.operation,

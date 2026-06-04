@@ -56,48 +56,60 @@ const fileReducer = (state: any, action: any) => {
       availableFiles = whiteBaordFiles.filter(function (obj) { return state.indexOf(obj) === -1; });
       if (availableFiles.length > 0) {
           if(availableFiles.length === 1) {
-            document.getElementById('add_page')!.style.display = 'none';
+            const addPageButton = document.getElementById('add_page');
+            if (addPageButton) addPageButton.style.display = 'none';
           }
-          alert(t('toast.add_page'));
+	          globalStore.showToast({
+	            message: t('toast.add_page'),
+	            type: 'notice',
+	          });
           sendToRemote("", availableFiles[0], "add-page", "");
           return [...state, availableFiles[0]];
       }
       return state;
     case 'remove-page':
-      let id = document.getElementsByClassName('pdfViewer active')[0].id.replace('viewerContainer','');
+      const activeViewer = document.getElementsByClassName('pdfViewer active')[0] as HTMLElement | undefined;
+      if (!activeViewer || state.length <= 1) return state;
+      let id = activeViewer.id.replace('viewerContainer','');
 
        // Removing from local storage
        let LocalStore  = new LocalStoreAdapter();
 
-       let annotationLayers = document.querySelectorAll(
-         "div.pdfViewer.active svg.customAnnotationLayer"
-       );
+       let annotationLayers = activeViewer.querySelectorAll("svg.customAnnotationLayer");
        annotationLayers.forEach(function (item) {
          item.innerHTML = "";
        });
 
-      LocalStore.resetAnnotation(
-       document!.querySelector("div.pdfViewer.active svg.customAnnotationLayer")!.getAttribute("data-pdf-annotate-document")
-      )
+      const annotationLayer = activeViewer.querySelector("svg.customAnnotationLayer");
+      const pageId = annotationLayer
+        ? annotationLayer.getAttribute("data-pdf-annotate-document") || id
+        : id;
+      if (annotationLayer) {
+        LocalStore.resetAnnotation(pageId);
+      }
  
-      if(id !== '1') {
-        let pageId = document.getElementById(`viewerContainer${id}`)!.getElementsByTagName('svg')[0].getAttribute('data-pdf-annotate-document');
-        let updatedFiles = state.filter(function (value: any, index: any) {
-          return value != id;
-        });
-        document.getElementsByClassName('pdfViewer active')[0].previousElementSibling?.classList.add('active');
+      let updatedFiles = state.filter(function (value: any) {
+        return String(value) !== String(id);
+      });
+      if (updatedFiles.length === state.length) return state;
+
+      const fallbackActive = activeViewer.previousElementSibling || activeViewer.nextElementSibling;
+      activeViewer.classList.remove('active');
+      fallbackActive?.classList.add('active');
 
         // show add button
         availableFiles = whiteBaordFiles.filter(function (obj) { return updatedFiles.indexOf(obj) == -1; });
         if(availableFiles.length > 0) {
-          document.getElementById('add_page')!.style.display = 'block';
+          const addPageButton = document.getElementById('add_page');
+          if (addPageButton) addPageButton.style.display = 'block';
         }
-        alert(t('toast.remove_page'));
+	        globalStore.showToast({
+	          message: t('toast.remove_page'),
+	          type: 'notice',
+	        });
         sendToRemote("", updatedFiles, "remove-page", pageId);
         roomStore.updateWhiteboardUid(JSON.stringify(uploadedFilesFrom(updatedFiles))).catch(() => {});
         return updatedFiles;
-      }
-      return state;
     case 'upload-file':
       const nextState = appendFile(state, action.fileId);
       if (nextState === state) return state;
@@ -108,8 +120,8 @@ const fileReducer = (state: any, action: any) => {
     case 'remote-add-page':
       return appendFile(state, action.fileId);
     case 'remote-remove-page':
-      document.getElementsByClassName('pdfViewer active')[0].previousElementSibling?.classList.add('active');
-      return action.fileId;
+      document.getElementsByClassName('pdfViewer active')[0]?.previousElementSibling?.classList.add('active');
+      return Array.isArray(action.fileId) && action.fileId.length ? action.fileId : state;
     default:
       return state;
   }
@@ -235,6 +247,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
   const [presentationMode, setPresentationMode] = useState(false);
   const [viewerZoom, setViewerZoom] = useState(1);
   const [viewerRotation, setViewerRotation] = useState(0);
+  const viewerZoomRef = useRef(viewerZoom);
   const currentPageRef = useRef(currentPage);
   const presentationModeRef = useRef(presentationMode);
   const scrollSyncTimer = useRef<number | null>(null);
@@ -277,11 +290,12 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
     }, 120);
   };
 
-  const updateBoardScale = () => {
+  const updateBoardScale = (zoomOverride?: number) => {
     const board = document.getElementById('Board') as HTMLElement | null;
     if (!board) return;
 
     const activeViewer = board.querySelector('.pdfViewer.active') as HTMLElement | null;
+    const activeSpreadsheet = Boolean(activeViewer?.querySelector('.spreadsheet-review-canvas'));
     const activePage = activeViewer && (
       presentationMode
         ? activeViewer.querySelector('.page.is-presentation-page') || activeViewer.querySelector('.page')
@@ -310,8 +324,12 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
       : compact && pageWidth
         ? Math.min(1, Math.max(0.52, availableWidth / pageWidth))
         : 1;
-    const manualZoom = Math.min(2.75, Math.max(0.5, Number(viewerZoom) || 1));
-    const scale = Math.min(2.75, Math.max(0.3, fitScale * manualZoom));
+    const requestedZoom = zoomOverride !== undefined ? zoomOverride : viewerZoomRef.current;
+    const manualZoom = Math.min(2.75, Math.max(0.5, Number(requestedZoom) || 1));
+    if (zoomOverride !== undefined) {
+      viewerZoomRef.current = manualZoom;
+    }
+    const scale = activeSpreadsheet ? 1 : Math.min(2.75, Math.max(0.3, fitScale * manualZoom));
 
     board.style.setProperty('--hexscrum-board-scale', scale.toFixed(3));
     board.style.setProperty('--hexscrum-board-left-gutter', `${leftGutter}px`);
@@ -354,7 +372,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [pdfFiles.length]);
+  }, [roomState.course.rid]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -368,12 +386,21 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
   },[pdfFiles]);
 
   useEffect(() => {
-    (window as any).__hexscrumUpdateBoardScale = () => window.requestAnimationFrame(updateBoardScale);
+    (window as any).__hexscrumUpdateBoardScale = (zoomOverride?: number) => {
+      if (zoomOverride !== undefined) {
+        viewerZoomRef.current = Math.min(2.75, Math.max(0.5, Number(zoomOverride) || 1));
+      }
+      window.requestAnimationFrame(() => updateBoardScale(zoomOverride));
+    };
     return () => {
       delete (window as any).__hexscrumUpdateBoardScale;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewerZoom, presentationMode, currentPage, totalPage, pdfFiles.length]);
+
+  useEffect(() => {
+    viewerZoomRef.current = viewerZoom;
+  }, [viewerZoom]);
 
   useEffect(() => {
     currentPageRef.current = currentPage;
@@ -423,7 +450,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
   useEffect(() => {
     document.body.classList.toggle('hexscrum-presentation-active', presentationMode);
     updatePresentationPageClass();
-    window.requestAnimationFrame(updateBoardScale);
+    window.requestAnimationFrame(() => updateBoardScale());
 
     return () => {
       document.body.classList.remove('hexscrum-presentation-active');
@@ -458,7 +485,7 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
     const onResize = () => updateBoardScale();
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
-    const timer = window.setTimeout(updateBoardScale, 350);
+    const timer = window.setTimeout(() => updateBoardScale(), 350);
 
     return () => {
       resizeObserver && resizeObserver.disconnect();
@@ -577,7 +604,9 @@ const MediaBoard: React.FC<MediaBoardProps> = ({
           fileDispatch: dispatch,
           setTotalPages: setTotalPages,
           currentPage: currentPage,
-          totalPage: totalPage
+          totalPage: totalPage,
+          viewerZoom,
+          viewerRotation,
           }}>
           <Whiteboard />
         </fileContext.Provider>

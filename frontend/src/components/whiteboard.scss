@@ -988,18 +988,33 @@ div#remove_page:after{
   margin: 0 auto;
 }
 
+.spreadsheet-review-frame {
+  width: max-content;
+  max-width: none;
+  margin: 18px auto 128px;
+  transform: rotate(var(--spreadsheet-viewer-rotation, 0deg));
+  transform-origin: top center;
+  zoom: var(--spreadsheet-viewer-zoom, 1);
+
+  &.rotation-90,
+  &.rotation-270 {
+    margin-top: 72px;
+    margin-bottom: 220px;
+  }
+}
+
 .spreadsheet-review-canvas {
   width: min(1320px, calc(100vw - var(--hexscrum-board-left-gutter) - var(--hexscrum-board-right-gutter)));
   min-width: 920px;
   height: calc(100vh - 188px);
-  margin: 18px auto 128px;
+  margin: 0;
   border: 1px solid rgba(64, 61, 57, 0.18);
   border-radius: 10px;
   background: rgba(255, 252, 242, 0.96);
   box-shadow: 0 18px 54px rgba(37, 36, 34, 0.16);
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto 1fr;
   color: #252422;
 }
 
@@ -1071,6 +1086,60 @@ div#remove_page:after{
   }
 }
 
+.spreadsheet-overlay-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(64, 61, 57, 0.12);
+  background: rgba(255, 252, 242, 0.72);
+  overflow-x: auto;
+
+  button,
+  label {
+    min-height: 32px;
+    border: 1px solid rgba(64, 61, 57, 0.14);
+    border-radius: 999px;
+    background: rgba(204, 197, 185, 0.2);
+    color: #403d39;
+    font-size: 12px;
+    font-weight: 850;
+    white-space: nowrap;
+  }
+
+  button {
+    padding: 0 11px;
+    cursor: pointer;
+
+    &.active {
+      border-color: #eb5e28;
+      background: #eb5e28;
+      color: #fffcf2;
+      box-shadow: 0 10px 24px rgba(235, 94, 40, 0.18);
+    }
+  }
+
+  label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+  }
+
+  input[type="color"] {
+    width: 22px;
+    height: 22px;
+    border: 0;
+    padding: 0;
+    background: transparent;
+  }
+
+  input[type="range"] {
+    width: 92px;
+    accent-color: #eb5e28;
+  }
+}
+
 .spreadsheet-sheet-tabs {
   display: flex;
   gap: 6px;
@@ -1110,7 +1179,15 @@ div#remove_page:after{
   background: #ccc5b9;
 }
 
+.spreadsheet-grid-stage {
+  position: relative;
+  min-width: max-content;
+  background: #fffcf2;
+}
+
 .spreadsheet-grid {
+  position: relative;
+  z-index: 1;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
@@ -1176,6 +1253,42 @@ div#remove_page:after{
     outline: none;
     box-sizing: border-box;
   }
+}
+
+.spreadsheet-overlay-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 4;
+  pointer-events: auto;
+  touch-action: none;
+
+  &.mode-cell {
+    pointer-events: none;
+  }
+
+  text {
+    paint-order: stroke;
+    stroke: rgba(255, 252, 242, 0.86);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+  }
+}
+
+.spreadsheet-overlay-text-editor {
+  position: absolute;
+  z-index: 5;
+  width: 220px;
+  min-height: 74px;
+  border: 1px solid rgba(235, 94, 40, 0.58);
+  border-radius: 10px;
+  padding: 8px;
+  background: rgba(255, 252, 242, 0.94);
+  box-shadow: 0 18px 48px rgba(37, 36, 34, 0.2);
+  color: #252422;
+  font-size: 13px;
+  line-height: 18px;
+  outline: none;
 }
 
 .presentation-status-bar {
@@ -1536,7 +1649,8 @@ body.hexscrum-presentation-active {
   animation: glassFadeIn 180ms ease-out;
 }
 
-.clear-modal-backdrop {
+.clear-modal-backdrop,
+.canvas-delete-modal-backdrop {
   position: fixed;
   inset: 0;
   z-index: 42;
@@ -1549,7 +1663,8 @@ body.hexscrum-presentation-active {
   animation: glassFadeIn 180ms ease-out;
 }
 
-.clear-modal-panel {
+.clear-modal-panel,
+.canvas-delete-modal-panel {
   width: min(430px, calc(100vw - 44px));
   padding: 24px;
   border: 1px solid rgba(255, 252, 242, 0.5);
@@ -1582,7 +1697,8 @@ body.hexscrum-presentation-active {
   }
 }
 
-.clear-modal-actions {
+.clear-modal-actions,
+.canvas-delete-modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;

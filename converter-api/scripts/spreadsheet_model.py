@@ -6,6 +6,7 @@ import sys
 import time
 
 import uno
+from com.sun.star.awt import Point, Size
 from com.sun.star.beans import PropertyValue
 from com.sun.star.table import BorderLine2
 
@@ -39,6 +40,10 @@ def set_property(target, name, value):
             target.setPropertyValue(name, value)
     except Exception:
         pass
+
+
+def uno_enum(name, value):
+    return uno.Enum(name, value)
 
 
 def connect(port):
@@ -89,6 +94,13 @@ def px_to_hmm(value, fallback):
         return fallback
 
 
+def overlay_px_to_hmm(value, offset=0):
+    try:
+        return px_to_hmm(max(0, float(value or 0) - offset), 0)
+    except Exception:
+        return 0
+
+
 def safe_sheet_name(name, index):
     raw = str(name or "Sheet {}".format(index + 1))
     cleaned = re.sub(r"[:\\/?*\[\]]", " ", raw).strip() or "Sheet {}".format(index + 1)
@@ -121,27 +133,41 @@ def load_document(desktop, input_path, ext, csv_filter_options):
     return doc
 
 
-def parse_workbook(doc):
+def parse_workbook(doc, max_rows=1000, max_cols=120):
     sheets = doc.getSheets()
     workbook = {
         "version": 1,
         "activeSheetId": "",
+        "truncated": False,
+        "limits": {
+            "maxRows": int(max_rows or 1000),
+            "maxColumns": int(max_cols or 120),
+        },
         "sheets": [],
     }
     for sheet_index, sheet_name in enumerate(sheets.getElementNames()):
         sheet = sheets.getByName(sheet_name)
         end_col, end_row = used_range(sheet)
-        row_count = end_row + 1
-        column_count = end_col + 1
+        source_row_count = end_row + 1
+        source_column_count = end_col + 1
+        row_count = min(source_row_count, int(max_rows or source_row_count or 1))
+        column_count = min(source_column_count, int(max_cols or source_column_count or 1))
+        truncated = row_count < source_row_count or column_count < source_column_count
+        if truncated:
+            workbook["truncated"] = True
         sheet_id = "sheet-{}".format(sheet_index + 1)
         parsed_sheet = {
             "id": sheet_id,
             "name": str(sheet_name),
             "rowCount": row_count,
             "columnCount": column_count,
+            "sourceRowCount": source_row_count,
+            "sourceColumnCount": source_column_count,
+            "truncated": truncated,
             "cells": {},
             "rowHeights": {},
             "columnWidths": {},
+            "overlays": [],
         }
         if not workbook["activeSheetId"]:
             workbook["activeSheetId"] = sheet_id
@@ -270,14 +296,107 @@ def build_document(desktop, model):
             if text_color >= 0:
                 set_property(cell, "CharColor", text_color)
 
+        draw_sheet_overlays(doc, sheet, sheet_model)
+
     for sheet_name in list(sheets.getElementNames())[len(model_sheets):]:
         sheets.removeByName(sheet_name)
     return doc
 
 
+def style_shape(shape, overlay, fill=False):
+    color = hex_to_color(overlay.get("color"), 0xEB5E28)
+    set_property(shape, "LineColor", color)
+    set_property(shape, "LineWidth", max(10, px_to_hmm(overlay.get("strokeWidth") or 2, 50)))
+    if fill:
+        set_property(shape, "FillStyle", uno_enum("com.sun.star.drawing.FillStyle", "SOLID"))
+        set_property(shape, "FillColor", color)
+        set_property(shape, "FillTransparence", 86)
+    else:
+        set_property(shape, "FillStyle", uno_enum("com.sun.star.drawing.FillStyle", "NONE"))
+
+
+def add_line_shape(doc, draw_page, x1, y1, x2, y2, overlay):
+    shape = doc.createInstance("com.sun.star.drawing.LineShape")
+    left = min(x1, x2)
+    top = min(y1, y2)
+    shape.Position = Point(left, top)
+    shape.Size = Size(abs(x2 - x1), abs(y2 - y1))
+    style_shape(shape, overlay, False)
+    draw_page.add(shape)
+
+
+def draw_sheet_overlays(doc, sheet, sheet_model):
+    overlays = sheet_model.get("overlays") or []
+    if not overlays:
+      return
+    draw_page = sheet.getDrawPage()
+    for overlay in overlays:
+        try:
+            overlay_type = str(overlay.get("type") or "")
+            if overlay_type == "pen":
+                points = overlay.get("points") or []
+                for index in range(1, len(points)):
+                    previous = points[index - 1]
+                    current = points[index]
+                    add_line_shape(
+                        doc,
+                        draw_page,
+                        overlay_px_to_hmm(previous.get("x"), 54),
+                        overlay_px_to_hmm(previous.get("y"), 32),
+                        overlay_px_to_hmm(current.get("x"), 54),
+                        overlay_px_to_hmm(current.get("y"), 32),
+                        overlay,
+                    )
+                continue
+
+            x = overlay_px_to_hmm(overlay.get("x"), 54)
+            y = overlay_px_to_hmm(overlay.get("y"), 32)
+            x2 = overlay_px_to_hmm(overlay.get("x2", overlay.get("x", 0) + overlay.get("width", 0)), 54)
+            y2 = overlay_px_to_hmm(overlay.get("y2", overlay.get("y", 0) + overlay.get("height", 0)), 32)
+            left = min(x, x2)
+            top = min(y, y2)
+            width = max(120, abs(x2 - x))
+            height = max(120, abs(y2 - y))
+
+            if overlay_type == "line":
+                add_line_shape(doc, draw_page, x, y, x2, y2, overlay)
+            elif overlay_type == "rectangle":
+                shape = doc.createInstance("com.sun.star.drawing.RectangleShape")
+                shape.Position = Point(left, top)
+                shape.Size = Size(width, height)
+                style_shape(shape, overlay, True)
+                draw_page.add(shape)
+            elif overlay_type == "ellipse":
+                shape = doc.createInstance("com.sun.star.drawing.EllipseShape")
+                shape.Position = Point(left, top)
+                shape.Size = Size(width, height)
+                style_shape(shape, overlay, True)
+                draw_page.add(shape)
+            elif overlay_type in ["text", "note"]:
+                shape = doc.createInstance("com.sun.star.drawing.TextShape")
+                shape.Position = Point(x, y)
+                shape.Size = Size(max(1800, width), max(520, height))
+                style_shape(shape, overlay, False)
+                set_property(shape, "LineTransparence", 100)
+                set_property(shape, "CharColor", hex_to_color(overlay.get("color"), 0xEB5E28))
+                set_property(shape, "CharHeight", 12)
+                shape.String = str(overlay.get("text") or "")
+                draw_page.add(shape)
+        except Exception:
+            pass
+
+
+def store_pdf(doc, output_path):
+    apply_pdf_grid_profile(doc)
+    doc.storeToURL(
+        uno.systemPathToFileUrl(output_path),
+        (prop("FilterName", "calc_pdf_Export"), prop("Overwrite", True)),
+    )
+
+
 def main():
     if len(sys.argv) < 3:
-        raise SystemExit("usage: spreadsheet_model.py parse|export ...")
+        raise SystemExit("usage: spreadsheet_model.py parse|prepare|export ...")
 
     mode = sys.argv[1]
     if mode == "parse":
@@ -301,6 +420,50 @@ def main():
                 doc.dispose()
         return
 
+    if mode == "prepare":
+        if len(sys.argv) < 10:
+            raise SystemExit("usage: spreadsheet_model.py prepare input output_pdf output_json ext port csv_filter_options max_rows max_cols")
+        input_path = os.path.abspath(sys.argv[2])
+        output_pdf = os.path.abspath(sys.argv[3])
+        output_json = os.path.abspath(sys.argv[4])
+        ext = sys.argv[5].lower()
+        port = int(sys.argv[6])
+        csv_filter_options = sys.argv[7]
+        max_rows = int(sys.argv[8])
+        max_cols = int(sys.argv[9])
+        ctx = connect(port)
+        desktop = ctx.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop", ctx)
+        doc = load_document(desktop, input_path, ext, csv_filter_options)
+        model = None
+        model_error = ""
+        try:
+            store_pdf(doc, output_pdf)
+            try:
+                model = parse_workbook(doc, max_rows, max_cols)
+            except Exception as exc:
+                model_error = str(exc) or "spreadsheet_model_unavailable"
+                model = {
+                    "version": 1,
+                    "activeSheetId": "",
+                    "truncated": False,
+                    "modelError": model_error,
+                    "limits": {
+                        "maxRows": max_rows,
+                        "maxColumns": max_cols,
+                    },
+                    "sheets": [],
+                }
+            if model_error:
+                model["modelError"] = model_error
+            with open(output_json, "w", encoding="utf-8") as handle:
+                json.dump(model, handle)
+        finally:
+            try:
+                doc.close(True)
+            except Exception:
+                doc.dispose()
+        return
+
     if mode == "export":
         if len(sys.argv) < 6:
             raise SystemExit("usage: spreadsheet_model.py export input_json output_file format port")
@@ -315,8 +478,8 @@ def main():
         doc = build_document(desktop, model)
         try:
             if export_format == "pdf":
-                apply_pdf_grid_profile(doc)
-                store_props = (prop("FilterName", "calc_pdf_Export"), prop("Overwrite", True))
+                store_pdf(doc, output_file)
+                return
             else:
                 store_props = (prop("FilterName", "Calc MS Excel 2007 XML"), prop("Overwrite", True))
             doc.storeToURL(uno.systemPathToFileUrl(output_file), store_props)

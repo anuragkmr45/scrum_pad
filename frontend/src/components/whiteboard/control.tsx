@@ -82,6 +82,7 @@ interface ControlProps {
 }
 
 type ExportOrientation = 'auto' | 'portrait' | 'landscape';
+type ExportCanvasKind = 'pdf-page' | 'spreadsheet';
 
 type ExportCanvasOption = {
   id: string
@@ -91,6 +92,8 @@ type ExportCanvasOption = {
   pageCount: number
   width: number
   height: number
+  kind: ExportCanvasKind
+  documentId?: string
 }
 
 type ExportPreviewItem = ExportCanvasOption & {
@@ -114,6 +117,12 @@ type WorkspaceMemberRow = {
   status: string
 }
 
+type RemoveCanvasTarget = {
+  kind: 'canvas' | 'document' | 'spreadsheet'
+  title: string
+  description: string
+}
+
 function syncPresentationPageAfterCanvasChange(pageNumber: number = 1) {
   const pageSync = (window as any).__hexscrumSetPresentationPage;
   if (!document.body.classList.contains('hexscrum-presentation-active') || typeof pageSync !== 'function') {
@@ -132,6 +141,11 @@ function resetBoardScrollAfterCanvasChange() {
   window.setTimeout(() => {
     (window as any).__hexscrumApplyingRemoteScroll = false;
   }, 120);
+  window.requestAnimationFrame(() => {
+    if (typeof (window as any).__hexscrumUpdateBoardScale === 'function') {
+      (window as any).__hexscrumUpdateBoardScale();
+    }
+  });
 }
 
 export const toggleNext = (
@@ -294,6 +308,42 @@ function getExportCanvasOptions(): ExportCanvasOption[] {
   ) as HTMLElement[];
 
   return viewers.flatMap((viewer, viewerIndex) => {
+    const spreadsheetCanvas = viewer.querySelector('.spreadsheet-review-canvas') as HTMLElement | null;
+    if (spreadsheetCanvas) {
+      const stage = spreadsheetCanvas.querySelector('.spreadsheet-grid-stage') as HTMLElement | null;
+      const table = spreadsheetCanvas.querySelector('.spreadsheet-grid') as HTMLElement | null;
+      const title = spreadsheetCanvas
+        .querySelector('.spreadsheet-review-toolbar strong')
+        ?.textContent
+        ?.trim();
+      const width = Math.ceil(Math.max(
+        stage?.scrollWidth || 0,
+        stage?.offsetWidth || 0,
+        table?.scrollWidth || 0,
+        spreadsheetCanvas.clientWidth || 0,
+        1
+      ));
+      const height = Math.ceil(Math.max(
+        stage?.scrollHeight || 0,
+        stage?.offsetHeight || 0,
+        table?.scrollHeight || 0,
+        spreadsheetCanvas.clientHeight || 0,
+        1
+      ));
+
+      return [{
+        id: `${viewer.id}__spreadsheet`,
+        viewerId: viewer.id,
+        label: title || `Spreadsheet ${viewerIndex + 1}`,
+        pageNumber: 1,
+        pageCount: 1,
+        width,
+        height,
+        kind: 'spreadsheet' as ExportCanvasKind,
+        documentId: spreadsheetCanvas.getAttribute('data-document-id') || undefined,
+      }];
+    }
+
     const pages = Array.from(viewer.querySelectorAll('.page')) as HTMLElement[];
     const totalPages = pages.length || 1;
     return pages.map((page, pageIndex) => {
@@ -308,6 +358,7 @@ function getExportCanvasOptions(): ExportCanvasOption[] {
         pageCount: totalPages,
         width,
         height,
+        kind: 'pdf-page' as ExportCanvasKind,
       };
     });
   });
@@ -418,9 +469,149 @@ function captureCanvasForExport(
   });
 }
 
-function getExportPageElement(option: ExportCanvasOption) {
+function escapeExportText(value: string) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function colorOrFallback(value: string, fallback: string) {
+  if (!value || value === 'transparent' || value === 'rgba(0, 0, 0, 0)') return fallback;
+  return value;
+}
+
+function drawSpreadsheetText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color: string,
+  isHeader: boolean
+) {
+  const value = escapeExportText(text);
+  if (!value) return;
+
+  context.save();
+  context.beginPath();
+  context.rect(x + 2, y + 1, Math.max(width - 4, 1), Math.max(height - 2, 1));
+  context.clip();
+  context.fillStyle = color;
+  context.font = isHeader ? '700 12px Arial, sans-serif' : '12px Arial, sans-serif';
+  context.textBaseline = 'middle';
+  context.textAlign = isHeader ? 'center' : 'left';
+  context.fillText(
+    value,
+    isHeader ? x + width / 2 : x + 6,
+    y + height / 2,
+    Math.max(width - 10, 1)
+  );
+  context.restore();
+}
+
+function drawSpreadsheetCell(
+  context: CanvasRenderingContext2D,
+  cell: HTMLElement,
+  table: HTMLElement,
+  isHeader: boolean
+) {
+  const computed = window.getComputedStyle(cell);
+  const x = cell.offsetLeft - table.offsetLeft;
+  const y = cell.offsetTop - table.offsetTop;
+  const width = cell.offsetWidth || Number(computed.width.replace('px', '')) || 1;
+  const height = cell.offsetHeight || Number(computed.height.replace('px', '')) || 1;
+  const input = cell.querySelector('input') as HTMLInputElement | null;
+  const text = input ? (input.value || input.getAttribute('value') || '') : (cell.textContent || '');
+  const background = colorOrFallback(computed.backgroundColor, isHeader ? '#403d39' : '#fffcf2');
+  const color = colorOrFallback(input?.style.color || computed.color, isHeader ? '#fffcf2' : '#252422');
+
+  context.fillStyle = background;
+  context.fillRect(x, y, width, height);
+  context.strokeStyle = isHeader ? 'rgba(255, 252, 242, 0.22)' : 'rgba(64, 61, 57, 0.22)';
+  context.lineWidth = 1;
+  context.strokeRect(x + 0.5, y + 0.5, Math.max(width - 1, 1), Math.max(height - 1, 1));
+  drawSpreadsheetText(context, text, x, y, width, height, color, isHeader);
+}
+
+function drawSpreadsheetOverlay(
+  context: CanvasRenderingContext2D,
+  stage: HTMLElement,
+  width: number,
+  height: number
+) {
+  const overlay = stage.querySelector('.spreadsheet-overlay-layer') as SVGSVGElement | null;
+  if (!overlay) return Promise.resolve();
+
+  const clonedOverlay = overlay.cloneNode(true) as SVGSVGElement;
+  clonedOverlay.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  clonedOverlay.setAttribute('width', String(width));
+  clonedOverlay.setAttribute('height', String(height));
+  clonedOverlay.setAttribute('viewBox', `0 0 ${width} ${height}`);
+
+  const serialized = new XMLSerializer().serializeToString(clonedOverlay);
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`;
+
+  return new Promise<void>((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      context.drawImage(image, 0, 0, width, height);
+      resolve();
+    };
+    image.onerror = () => resolve();
+    image.src = url;
+  });
+}
+
+async function captureSpreadsheetForExport(
+  stage: HTMLElement,
+  option: ExportCanvasOption,
+  includeAnnotations: boolean,
+  scale: number = 1
+) {
+  const table = stage.querySelector('.spreadsheet-grid') as HTMLElement | null;
+  const width = Math.ceil(Math.max(option.width, stage.scrollWidth, stage.offsetWidth, table?.scrollWidth || 0, 1));
+  const height = Math.ceil(Math.max(option.height, stage.scrollHeight, stage.offsetHeight, table?.scrollHeight || 0, 1));
+  const maxPixels = scale < 1 ? 3200000 : 16000000;
+  const boundedScale = Math.min(scale, Math.sqrt(maxPixels / Math.max(width * height, 1)));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil(width * boundedScale));
+  canvas.height = Math.max(1, Math.ceil(height * boundedScale));
+
+  const context = canvas.getContext('2d');
+  if (!context || !table) return canvas;
+
+  context.scale(boundedScale, boundedScale);
+  context.fillStyle = '#fffcf2';
+  context.fillRect(0, 0, width, height);
+
+  Array.from(table.querySelectorAll('th, td')).forEach((cell) => {
+    drawSpreadsheetCell(context, cell as HTMLElement, table, cell.tagName.toLowerCase() === 'th');
+  });
+
+  if (includeAnnotations) {
+    await drawSpreadsheetOverlay(context, stage, width, height);
+  }
+
+  return canvas;
+}
+
+function captureExportElement(
+  element: HTMLElement,
+  option: ExportCanvasOption,
+  includeAnnotations: boolean,
+  scale: number = 1
+) {
+  if (option.kind === 'spreadsheet') {
+    return captureSpreadsheetForExport(element, option, includeAnnotations, scale);
+  }
+  return captureCanvasForExport(element, includeAnnotations, scale);
+}
+
+function getExportElement(option: ExportCanvasOption) {
   const viewer = document.getElementById(option.viewerId);
   if (!viewer) return null;
+  if (option.kind === 'spreadsheet') {
+    return viewer.querySelector('.spreadsheet-review-canvas .spreadsheet-grid-stage') as HTMLElement | null;
+  }
   return viewer.querySelector(`.page[data-page-number="${option.pageNumber}"]`) as HTMLElement | null;
 }
 
@@ -429,6 +620,50 @@ function isTextEntryTarget(target: EventTarget | null) {
   if (!node) return false;
   const tagName = (node.tagName || '').toLowerCase();
   return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || node.isContentEditable;
+}
+
+function getActiveRemoveTarget(): RemoveCanvasTarget {
+  const activeViewer = document.querySelector('.pdfViewer.active') as HTMLElement | null;
+  if (!activeViewer) {
+    return {
+      kind: 'canvas',
+      title: 'Delete canvas',
+      description: 'This removes the active canvas from the live board.',
+    };
+  }
+
+  const activeId = activeViewer.id.replace('viewerContainer', '');
+  const isUploadedDocument = Number.isNaN(Number(activeId));
+  const spreadsheetTitle = activeViewer
+    .querySelector('.spreadsheet-review-toolbar strong')
+    ?.textContent
+    ?.trim();
+
+  if (activeViewer.querySelector('.spreadsheet-review-canvas')) {
+    return {
+      kind: 'spreadsheet',
+      title: 'Delete spreadsheet from board',
+      description: `This removes ${spreadsheetTitle || 'this spreadsheet'} from the live board. Workspace history remains available.`,
+    };
+  }
+
+  if (isUploadedDocument) {
+    return {
+      kind: 'document',
+      title: 'Delete document from board',
+      description: 'This removes the uploaded document from the live board for everyone. Workspace history remains available.',
+    };
+  }
+
+  return {
+    kind: 'canvas',
+    title: 'Delete canvas',
+    description: 'This removes the active blank canvas and its annotations from the live board for everyone.',
+  };
+}
+
+function activeViewerHasSpreadsheet() {
+  return Boolean(document.querySelector('.pdfViewer.active .spreadsheet-review-canvas'));
 }
 
 export default function Control({
@@ -469,10 +704,12 @@ export default function Control({
   const [shareStatus, setShareStatus] = useState('');
   const [participantStatus, setParticipantStatus] = useState('');
   const [participantsLoading, setParticipantsLoading] = useState(false);
+  const [removeCanvasTarget, setRemoveCanvasTarget] = useState<RemoveCanvasTarget | null>(null);
   let recorder = useRef<any>();
   let desktopStream = useRef<any>();
   const previewRequestId = useRef(0);
   const participantRequestInFlight = useRef(false);
+  const liveViewerZoomRef = useRef(1);
   // to get current canvas number
   const [currentCanvasNumber, setCanvasNumber] = useState(1);
   const isLiveReview = useMemo(() => Boolean(location.pathname.match(/one-to-one/)), [location.pathname]);
@@ -493,24 +730,39 @@ export default function Control({
   const viewerZoom = Math.min(2.75, Math.max(0.5, Number(fileState.viewerZoom) || 1));
   const viewerRotation = ((Number(fileState.viewerRotation) || 0) % 360 + 360) % 360;
 
-  const refreshBoardScale = () => {
+  const refreshBoardScale = (zoomOverride?: number) => {
     if (typeof (window as any).__hexscrumUpdateBoardScale === 'function') {
-      (window as any).__hexscrumUpdateBoardScale();
+      (window as any).__hexscrumUpdateBoardScale(zoomOverride);
     }
   };
 
-  const setLiveViewerZoom = (nextZoom: number) => {
-    const roundedZoom = Math.round(Math.min(2.75, Math.max(0.5, nextZoom)) * 100) / 100;
+  useEffect(() => {
+    liveViewerZoomRef.current = viewerZoom;
+  }, [viewerZoom]);
+
+  const setLiveViewerZoom = (nextZoom: number | ((currentZoom: number) => number)) => {
+    const currentZoom = Math.min(2.75, Math.max(0.5, Number(liveViewerZoomRef.current || viewerZoom) || 1));
+    const requestedZoom = typeof nextZoom === 'function' ? nextZoom(currentZoom) : nextZoom;
+    const roundedZoom = Math.round(Math.min(2.75, Math.max(0.5, requestedZoom)) * 100) / 100;
+    liveViewerZoomRef.current = roundedZoom;
+    const activeSpreadsheetFrame = document.querySelector('.pdfViewer.active .spreadsheet-review-frame') as HTMLElement | null;
+    if (activeSpreadsheetFrame) {
+      activeSpreadsheetFrame.style.setProperty('--spreadsheet-viewer-zoom', String(roundedZoom));
+    }
     if (typeof fileState.setViewerZoom === 'function') {
       fileState.setViewerZoom(roundedZoom);
-      window.setTimeout(refreshBoardScale, 0);
     }
+    refreshBoardScale(roundedZoom);
   };
 
   const setLiveViewerRotation = (nextRotation: number) => {
     const normalizedRotation = ((nextRotation % 360) + 360) % 360;
     if (typeof fileState.setViewerRotation === 'function') {
       fileState.setViewerRotation(normalizedRotation);
+    }
+    if (activeViewerHasSpreadsheet()) {
+      window.setTimeout(refreshBoardScale, 160);
+      return;
     }
     const rotateActivePdf = (window as any).__hexscrumRotateActivePdfView;
     if (typeof rotateActivePdf === 'function') {
@@ -523,6 +775,15 @@ export default function Control({
       }
     }
     window.setTimeout(refreshBoardScale, 160);
+  };
+
+  const openRemoveCanvasDialog = () => {
+    setRemoveCanvasTarget(getActiveRemoveTarget());
+  };
+
+  const confirmRemoveCanvas = () => {
+    fileState.fileDispatch({ type: 'remove-page' });
+    setRemoveCanvasTarget(null);
   };
 
   useEffect(() => {
@@ -733,6 +994,10 @@ export default function Control({
 
   const openExportDialog = () => {
     const canvases = getExportCanvasOptions();
+    const activeViewerId = (document.querySelector('.pdfViewer.active') as HTMLElement | null)?.id || '';
+    const activeCanvasIds = canvases
+      .filter((canvas) => canvas.viewerId === activeViewerId)
+      .map((canvas) => canvas.id);
     const me = roomStore._state.me || {};
     const participantMap: { [key: string]: ExportParticipant } = {};
     if (me.uid || me.account || role) {
@@ -755,7 +1020,7 @@ export default function Control({
       });
     setExportCanvases(canvases);
     setExportParticipants(Object.values(participantMap));
-    setSelectedExportCanvasIds(canvases.map((canvas) => canvas.id));
+    setSelectedExportCanvasIds(activeCanvasIds.length ? activeCanvasIds : canvases.map((canvas) => canvas.id));
     setExportOrientation('auto');
     setExportRotation(0);
     setExportIncludeAnnotations(true);
@@ -781,9 +1046,9 @@ export default function Control({
         .slice(0, 8);
 
       for (const pageMeta of selectedPages) {
-        const page = getExportPageElement(pageMeta);
-        if (!page) continue;
-        const previewCanvas = await captureCanvasForExport(page, exportIncludeAnnotations, 0.28);
+        const element = getExportElement(pageMeta);
+        if (!element) continue;
+        const previewCanvas = await captureExportElement(element, pageMeta, exportIncludeAnnotations, 0.28);
         if (previewRequestId.current !== requestId) return;
         nextPreviewItems.push({
           ...pageMeta,
@@ -1070,10 +1335,10 @@ export default function Control({
       let pdf: any = null;
 
       for (let i = 0; i < selectedPages.length; i++) {
-        const pageElement = getExportPageElement(selectedPages[i]);
-        if (!pageElement) continue;
+        const exportElement = getExportElement(selectedPages[i]);
+        if (!exportElement) continue;
 
-        const sourceCanvas = await captureCanvasForExport(pageElement, exportIncludeAnnotations);
+        const sourceCanvas = await captureExportElement(exportElement, selectedPages[i], exportIncludeAnnotations);
         const canvas = rotateCanvas(sourceCanvas, exportRotation);
         const pageOrientation = getPdfOrientation(exportOrientation, canvas);
         const [pageWidth, pageHeight] = getPdfPageSize(exportOrientation, canvas);
@@ -1339,15 +1604,10 @@ export default function Control({
                 {
                   fileState.pdfFiles.length > 1 ?
                     <div className="control-button">
-                      <RemoveCircleOutlineOutlinedIcon
-                        id="remove_page"
-                        onClick={
-                          () => {
-                            if (window.confirm('Are you sure you want to delete canvas?'))
-                              fileState.fileDispatch({ type: 'remove-page' })
-                          }
-                        }
-                      />
+	                      <RemoveCircleOutlineOutlinedIcon
+	                        id="remove_page"
+	                        onClick={openRemoveCanvasDialog}
+	                      />
                       <span className="tooltiptext">Remove Canvas</span>
                     </div> : null
                 }
@@ -1357,7 +1617,7 @@ export default function Control({
             {canManageWorkspace ?
               <>
                 <div className="control-button">
-                  <ZoomOutIcon onClick={() => setLiveViewerZoom(viewerZoom - 0.25)} />
+                  <ZoomOutIcon onClick={() => setLiveViewerZoom((currentZoom) => currentZoom - 0.25)} />
                   <span className="tooltiptext">Zoom out document</span>
                 </div>
                 <button
@@ -1369,7 +1629,7 @@ export default function Control({
                   {Math.round(viewerZoom * 100)}%
                 </button>
                 <div className="control-button">
-                  <ZoomInIcon onClick={() => setLiveViewerZoom(viewerZoom + 0.25)} />
+                  <ZoomInIcon onClick={() => setLiveViewerZoom((currentZoom) => currentZoom + 0.25)} />
                   <span className="tooltiptext">Zoom in document</span>
                 </div>
                 <div className="control-button">
@@ -1571,13 +1831,25 @@ export default function Control({
             </div>
           </div> : null}
       </div>
-      <PollCard
-        createFlag={createPollFlag}
-        role={role}
-        tool={handlePollTool}
-        endPoll={endPoll}
-      />
-      {exportDialogOpen ?
+	      <PollCard
+	        createFlag={createPollFlag}
+	        role={role}
+	        tool={handlePollTool}
+	        endPoll={endPoll}
+	      />
+	      {removeCanvasTarget ?
+	        <div className="canvas-delete-modal-backdrop" role="presentation" onClick={() => setRemoveCanvasTarget(null)}>
+	          <div className="canvas-delete-modal-panel" role="dialog" aria-modal="true" aria-labelledby="deleteCanvasTitle" onClick={(event) => event.stopPropagation()}>
+	            <span>{removeCanvasTarget.kind === 'canvas' ? 'Live canvas' : removeCanvasTarget.kind === 'spreadsheet' ? 'Spreadsheet' : 'Document'}</span>
+	            <h2 id="deleteCanvasTitle">{removeCanvasTarget.title}</h2>
+	            <p>{removeCanvasTarget.description}</p>
+	            <div className="canvas-delete-modal-actions">
+	              <button type="button" onClick={() => setRemoveCanvasTarget(null)}>Cancel</button>
+	              <button type="button" className="danger" onClick={confirmRemoveCanvas}>Delete</button>
+	            </div>
+	          </div>
+	        </div> : null}
+	      {exportDialogOpen ?
         <div className="export-modal-backdrop" role="presentation">
           <div className="export-modal-panel" role="dialog" aria-modal="true" aria-labelledby="exportPdfTitle">
             <div className="export-modal-header">
@@ -1606,7 +1878,11 @@ export default function Control({
                     />
                     <span>
                       <strong>{canvas.label}</strong>
-                      <small>Page {canvas.pageNumber} of {canvas.pageCount}</small>
+                      <small>
+                        {canvas.kind === 'spreadsheet'
+                          ? 'Spreadsheet grid'
+                          : `Page ${canvas.pageNumber} of ${canvas.pageCount}`}
+                      </small>
                     </span>
                   </label>
                 ))}
@@ -1724,7 +2000,7 @@ export default function Control({
             </div>
 
             <div className="export-modal-footer">
-              <span>{selectedExportCanvasIds.length} page{selectedExportCanvasIds.length === 1 ? '' : 's'} selected</span>
+              <span>{selectedExportCanvasIds.length} item{selectedExportCanvasIds.length === 1 ? '' : 's'} selected</span>
               <button
                 type="button"
                 className="primary"

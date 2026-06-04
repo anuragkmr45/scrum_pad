@@ -41,6 +41,16 @@ const Toolelements = () => {
 		documentId: 'default'
   };
 
+  const emitToolChange = (nextTool = tooltype, nextColor = color, nextThickness = thickness) => {
+    window.dispatchEvent(new CustomEvent('hexscrum:tool-change', {
+      detail: {
+        tool: nextTool,
+        color: nextColor,
+        thickness: nextThickness,
+      },
+    }));
+  };
+
   const showTool = useMemo(() => {
     if (roomStore._state.course.allowAnnotation 
       && roomStore._state.me.role === 'teacher' 
@@ -76,6 +86,7 @@ const Toolelements = () => {
     UI.setRect(thickness, color);
     localStorage.setItem(RENDER_OPTIONS.documentId + '/rect/size', thickness);
     localStorage.setItem(RENDER_OPTIONS.documentId + '/rect/color', color);
+    emitToolChange(tooltype, color, thickness);
 
   },[color, thickness, tooltype]);
 
@@ -179,6 +190,7 @@ const Toolelements = () => {
              document.getElementsByClassName('.nav-colopiker').style.display = 'none'
           }
           setToolType(type);
+          emitToolChange(type, color, thickness);
     }
 
   }
@@ -255,7 +267,9 @@ const Toolelements = () => {
   }
 
   const handleThicknessChange = (event) => {
-    changeThickness(Number(event.target.value));
+    const nextThickness = Number(event.target.value);
+    changeThickness(nextThickness);
+    emitToolChange(tooltype, color, nextThickness);
   }
 
   const showLoader = () => {
@@ -347,30 +361,60 @@ const Toolelements = () => {
     formData.append("userName", roomStore._state.me.account || profile.name || '');
     formData.append("userDesignation", profile.designation || '');
     formData.append("userColor", profile.color || '');
-    fetch(converterUploadUrl, {
-      method: "POST",
-      body: formData,
-    })
-      .then((resp) => resp.json())
-      .then((data) => {
-        if (data.error) {
-          alert(data.error);
+    try {
+      const resp = await fetch(converterUploadUrl, {
+        method: "POST",
+        body: formData,
+      });
+      const contentType = resp.headers.get("content-type") || "";
+      const raw = await resp.text();
+      let data = {};
+      if (raw && contentType.includes("application/json")) {
+        try {
+          data = JSON.parse(raw);
+        } catch (err) {
+          data = {};
+        }
+      }
+      if (!resp.ok) {
+        const htmlOrEmpty = !raw || raw.trim().startsWith("<!DOCTYPE") || raw.trim().startsWith("<html");
+        const message = data.error ||
+          (resp.status === 502 || htmlOrEmpty
+            ? "Spreadsheet conversion timed out or Render restarted. Try a smaller file or retry after the backend wakes up."
+            : raw || `Upload failed with status ${resp.status}.`);
+        alert(message);
+        hideLoader();
+        return;
+      }
+      if (!Object.keys(data).length && raw) {
+        try {
+          data = JSON.parse(raw);
+        } catch (err) {
+          alert("Upload succeeded but the converter returned an unreadable response.");
           hideLoader();
           return;
         }
-        setUploadStatus({
-          fileName: file.name,
-          fileType: 'PDF',
-          message: 'Document ready. Syncing to workspace...'
-        });
-        registerSpreadsheetDocumentFromUpload(data);
-        fileState.fileDispatch({ type: "upload-file", fileId: data.secure_url || data.url });
+      }
+      if (data.error) {
+        alert(data.error);
         hideLoader();
-      })
-      .catch((error) => {
-        alert("Upload failed. Check the converter API health, Cloudinary credentials, and CORS settings.");
-        hideLoader();
+        return;
+      }
+      setUploadStatus({
+        fileName: file.name,
+        fileType: data.documentKind === 'spreadsheet' && data.spreadsheetEditable ? 'SHEET' : 'PDF',
+        message: data.spreadsheetWarning || 'Document ready. Syncing to workspace...'
       });
+      registerSpreadsheetDocumentFromUpload(data);
+      fileState.fileDispatch({ type: "upload-file", fileId: data.secure_url || data.url });
+      if (data.spreadsheetWarning) {
+        window.setTimeout(() => alert(data.spreadsheetWarning), 120);
+      }
+      hideLoader();
+    } catch (error) {
+      alert("Spreadsheet conversion timed out or the converter API is unreachable. Retry after the backend wakes up, or use a smaller file.");
+      hideLoader();
+    }
   }
 
 

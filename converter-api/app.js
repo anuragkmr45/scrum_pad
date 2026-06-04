@@ -20,6 +20,16 @@ const cloudinaryFolder = process.env.CLOUDINARY_FOLDER || "hexscrum-workspace";
 const configuredMaxUploadMb = Number(process.env.MAX_UPLOAD_MB || 25);
 const maxUploadMb = Number.isFinite(configuredMaxUploadMb) && configuredMaxUploadMb > 0 ? configuredMaxUploadMb : 25;
 const maxUploadBytes = maxUploadMb * 1024 * 1024;
+const configuredSpreadsheetMaxRows = Number(process.env.SPREADSHEET_EDITABLE_MAX_ROWS || 1000);
+const configuredSpreadsheetMaxColumns = Number(process.env.SPREADSHEET_EDITABLE_MAX_COLUMNS || 120);
+const spreadsheetEditableMaxRows =
+  Number.isFinite(configuredSpreadsheetMaxRows) && configuredSpreadsheetMaxRows > 0
+    ? configuredSpreadsheetMaxRows
+    : 1000;
+const spreadsheetEditableMaxColumns =
+  Number.isFinite(configuredSpreadsheetMaxColumns) && configuredSpreadsheetMaxColumns > 0
+    ? configuredSpreadsheetMaxColumns
+    : 120;
 const officeConverter = (process.env.OFFICE_CONVERTER || "libreoffice").toLowerCase();
 const uploadDir = path.resolve("./test");
 const publicUploadDir = path.resolve(process.env.LOCAL_UPLOAD_DIR || "./uploaded-files");
@@ -285,6 +295,7 @@ function corsMiddleware(req, res, next) {
   }
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
   res.header("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS,POST,PUT,PATCH,DELETE");
+  res.header("Access-Control-Expose-Headers", "Content-Disposition, Content-Type, Content-Length");
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
   }
@@ -499,6 +510,32 @@ function csvFilterOptions(delimiter) {
   return `${separatorCode},34,76,1`;
 }
 
+function createUploadTimer(publicId, fileName) {
+  const startedAt = Date.now();
+  let lastAt = startedAt;
+  const stages = [];
+  return {
+    mark(stage, extra = {}) {
+      const now = Date.now();
+      const item = {
+        stage,
+        deltaMs: now - lastAt,
+        totalMs: now - startedAt,
+        ...extra
+      };
+      stages.push(item);
+      lastAt = now;
+      console.info(
+        `[upload:${publicId}] ${stage} +${item.deltaMs}ms total=${item.totalMs}ms file=${fileName}`
+      );
+      return item;
+    },
+    stages() {
+      return stages.slice();
+    }
+  };
+}
+
 async function convertSpreadsheetToPdf(inputPath, outputPath, ext) {
   const scriptPath = path.join(__dirname, "scripts", "spreadsheet_to_pdf.py");
   const command = getLibreOfficeCommand();
@@ -646,6 +683,61 @@ async function extractSpreadsheetModel(inputPath, ext, csvDelimiter) {
   }
 }
 
+async function prepareSpreadsheetUpload(inputPath, outputPath, ext) {
+  const outputJson = path.join(uploadDir, `spreadsheet-prepare-${crypto.randomBytes(8).toString("hex")}.json`);
+  const csvDelimiter = ext === ".csv" ? await detectCsvDelimiter(inputPath) : "";
+  try {
+    await runSpreadsheetModelScript(
+      port => [
+        "prepare",
+        inputPath,
+        outputPath,
+        outputJson,
+        ext,
+        String(port),
+        csvFilterOptions(csvDelimiter || ","),
+        String(spreadsheetEditableMaxRows),
+        String(spreadsheetEditableMaxColumns)
+      ],
+      180000
+    );
+    if (!fs.existsSync(outputPath)) {
+      throw new Error("spreadsheet_pdf_missing");
+    }
+    let model = null;
+    let modelError = "";
+    try {
+      model = JSON.parse(await fs.promises.readFile(outputJson, "utf8"));
+      modelError = model && model.modelError ? String(model.modelError) : "";
+      if (!model || !Array.isArray(model.sheets) || !model.sheets.length) {
+        model = null;
+        modelError = modelError || "spreadsheet_model_unavailable";
+      }
+    } catch (err) {
+      model = null;
+      modelError = err.message || "spreadsheet_model_unavailable";
+    }
+    return {
+      outputPath,
+      converted: true,
+      contentType: "application/pdf",
+      documentKind: "spreadsheet",
+      conversionProfile: "grid-fit",
+      sourceExtension: ext,
+      csvDelimiter,
+      spreadsheetModel: model,
+      spreadsheetModelError: modelError,
+      truncated: Boolean(model && model.truncated),
+      editableLimits: {
+        maxRows: spreadsheetEditableMaxRows,
+        maxColumns: spreadsheetEditableMaxColumns
+      }
+    };
+  } finally {
+    deleteFile(outputJson);
+  }
+}
+
 async function exportSpreadsheetModel(model, outputPath, format) {
   const inputJson = path.join(uploadDir, `spreadsheet-export-${crypto.randomBytes(8).toString("hex")}.json`);
   try {
@@ -663,9 +755,40 @@ async function exportSpreadsheetModel(model, outputPath, format) {
     if (!fs.existsSync(outputPath)) {
       throw new Error("spreadsheet_export_missing");
     }
+    const stat = await fs.promises.stat(outputPath);
+    if (!stat.size || stat.size < 512) {
+      throw new Error("spreadsheet_export_empty");
+    }
+    if (format === "xlsx") {
+      const handle = await fs.promises.open(outputPath, "r");
+      try {
+        const signature = Buffer.alloc(4);
+        await handle.read(signature, 0, 4, 0);
+        if (signature[0] !== 0x50 || signature[1] !== 0x4b) {
+          throw new Error("spreadsheet_export_invalid_xlsx");
+        }
+      } finally {
+        await handle.close();
+      }
+    }
   } finally {
     deleteFile(inputJson);
   }
+}
+
+function spreadsheetModelHasVisibleContent(model) {
+  const sheets = Array.isArray(model && model.sheets) ? model.sheets : [];
+  return sheets.some(sheet => {
+    const cells = sheet && sheet.cells && typeof sheet.cells === "object" ? sheet.cells : {};
+    const hasCellValue = Object.keys(cells).some(key => {
+      const cell = cells[key] || {};
+      return String(cell.value || "").trim() ||
+        String(cell.fillColor || "").trim() ||
+        String(cell.textColor || "").trim();
+    });
+    const hasOverlays = Array.isArray(sheet && sheet.overlays) && sheet.overlays.length > 0;
+    return hasCellValue || hasOverlays;
+  });
 }
 
 function convertImageToPdf(inputPath, outputPath) {
@@ -758,6 +881,13 @@ async function preparePdf(inputPath, outputPath, ext) {
     if (!converterAvailable()) {
       throw new Error("converter_not_available");
     }
+    if (spreadsheetProfileAvailable()) {
+      try {
+        return await prepareSpreadsheetUpload(inputPath, outputPath, ext);
+      } catch (err) {
+        console.warn("spreadsheet prepare failed; falling back to PDF-only conversion:", err.message);
+      }
+    }
     const profile = await convertSpreadsheetToPdf(inputPath, outputPath, ext);
     return {
       outputPath,
@@ -766,7 +896,14 @@ async function preparePdf(inputPath, outputPath, ext) {
       documentKind: "spreadsheet",
       conversionProfile: profile.conversionProfile,
       sourceExtension: ext,
-      csvDelimiter: profile.csvDelimiter
+      csvDelimiter: profile.csvDelimiter,
+      spreadsheetModel: null,
+      spreadsheetModelError: "spreadsheet_editable_model_unavailable",
+      truncated: false,
+      editableLimits: {
+        maxRows: spreadsheetEditableMaxRows,
+        maxColumns: spreadsheetEditableMaxColumns
+      }
     };
   }
 
@@ -854,6 +991,8 @@ app.get(
       spreadsheetProfileAvailable: spreadsheetProfileAvailable(),
       uploadField: "sampleFile",
       maxUploadMb,
+      spreadsheetEditableMaxRows,
+      spreadsheetEditableMaxColumns,
       auditSchemaReady: !schemaInitError
     });
   })
@@ -1027,6 +1166,9 @@ app.post(
     const state = await auditStore.getSpreadsheetState(req.params.id, req.params.documentId);
     if (!state) return res.status(404).json({ error: "spreadsheet_not_found" });
     const format = String(req.body.format || req.query.format || "pdf").toLowerCase() === "xlsx" ? "xlsx" : "pdf";
+    if (!spreadsheetModelHasVisibleContent(state.model_json || {})) {
+      return res.status(422).json({ error: "Spreadsheet export is empty. Add cell content or overlay annotations before exporting." });
+    }
     const extension = format === "xlsx" ? "xlsx" : "pdf";
     const outputPath = path.join(uploadDir, `spreadsheet-export-${crypto.randomBytes(8).toString("hex")}.${extension}`);
     await exportSpreadsheetModel(state.model_json || {}, outputPath, format);
@@ -1115,24 +1257,25 @@ app.post(
     const publicId = `${Date.now()}-${randomStr}`;
     const publicFileName = `${publicId}.pdf`;
     let prepared;
-    let spreadsheetModel = null;
-    let spreadsheetModelError = "";
+    let uploadTiming = createUploadTimer(publicId, safeName);
 
     try {
       await moveUploadedFile(sampleFile, inputPath);
+      uploadTiming.mark("file_save", { bytes: sampleFile.size });
       prepared = await preparePdf(inputPath, outputPath, ext);
-      if (prepared.documentKind === "spreadsheet") {
-        try {
-          spreadsheetModel = await extractSpreadsheetModel(inputPath, ext, prepared.csvDelimiter || ",");
-        } catch (err) {
-          spreadsheetModelError = err.message || "spreadsheet_model_unavailable";
-          console.warn("Spreadsheet model extraction skipped:", spreadsheetModelError);
-        }
-      }
+      uploadTiming.mark("prepare_pdf", {
+        documentKind: prepared.documentKind,
+        conversionProfile: prepared.conversionProfile,
+        editable: Boolean(prepared.spreadsheetModel)
+      });
       const upload = await uploadOutput(prepared.outputPath, publicId, prepared.contentType);
+      uploadTiming.mark("storage_upload", { provider: upload.provider });
       const publicPath = path.join(publicUploadDir, publicFileName);
       await copyFile(prepared.outputPath, publicPath);
       const servedPdfUrl = publicFileUrl(req, publicFileName);
+      uploadTiming.mark("local_pdf_copy");
+      const spreadsheetModel = prepared.spreadsheetModel || null;
+      const spreadsheetModelError = prepared.spreadsheetModelError || "";
       const document = req.body.workspaceId
         ? await auditStore.createDocument({
             workspaceId: req.body.workspaceId,
@@ -1150,16 +1293,20 @@ app.post(
               csvDelimiter: prepared.csvDelimiter || "",
               spreadsheetEditable: Boolean(spreadsheetModel),
               spreadsheetModelError,
+              spreadsheetTruncated: Boolean(prepared.truncated),
+              spreadsheetEditableLimits: prepared.editableLimits || {},
               storageProvider,
               backendFileUrl: servedPdfUrl,
               cloudinaryUrl: upload.secure_url || upload.url,
               cloudinaryPublicId: upload.publicId || "",
               originalMimeType: sampleFile.mimetype || "",
               uploaderName: req.body.userName || "",
-              uploaderDesignation: req.body.userDesignation || ""
+              uploaderDesignation: req.body.userDesignation || "",
+              uploadTiming: uploadTiming.stages()
             }
           })
         : null;
+      uploadTiming.mark("db_document_save", { hasDocument: Boolean(document) });
       let spreadsheet = null;
       if (document && spreadsheetModel) {
         const state = await auditStore.saveSpreadsheetState({
@@ -1175,7 +1322,9 @@ app.post(
           model: spreadsheetModel
         };
       }
+      uploadTiming.mark("spreadsheet_state_save", { editable: Boolean(spreadsheet) });
 
+      uploadTiming.mark("response");
       return res.status(200).json({
         url: servedPdfUrl,
         secure_url: servedPdfUrl,
@@ -1192,6 +1341,12 @@ app.post(
         csvDelimiter: prepared.csvDelimiter || "",
         spreadsheetEditable: Boolean(spreadsheet),
         spreadsheetModelError,
+        spreadsheetWarning: spreadsheetModelError
+          ? "Spreadsheet PDF fallback was created, but editable grid mode could not be prepared."
+          : "",
+        spreadsheetTruncated: Boolean(prepared.truncated),
+        spreadsheetEditableLimits: prepared.editableLimits || {},
+        uploadTiming: uploadTiming.stages(),
         document,
         spreadsheet
       });
